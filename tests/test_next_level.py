@@ -12,7 +12,7 @@ from cbm_memory.repoindex import index_repo
 
 def make_repo(tmp_path, files: dict[str, str], commit: str = "feat: initial"):
     root = tmp_path / "repo"
-    root.mkdir()
+    root.mkdir(parents=True, exist_ok=True)
     run_git(root, "init", "-q", "-b", "main")
     for path, text in files.items():
         p = root / path
@@ -178,6 +178,46 @@ def test_pagerank_beats_lexical_relevance(tmp_path):
     g = graph_for(repo)
     ctx = g.get_codebase_context("*", "shared_core")
     assert ctx["top_files"][0]["path"] == "hub.py"
+
+
+# ---------- architecture: multi-repo per server + concurrency + caching ----------
+
+def test_index_repositories_multi_repo(tmp_path):
+    import threading
+
+    from cbm_memory import mcp_server
+    a = make_repo(tmp_path / "a", {"app.py": "def only_in_a():\n    pass\n"})
+    b = make_repo(tmp_path / "b", {"app.py": "def only_in_b():\n    pass\n"})
+    g = mcp_server.index_repositories([str(a), str(b)], workers=2)
+    ctx = g.get_codebase_context("*", "only_in_b")
+    assert ctx["top_files"][0]["path"] == "app.py"   # both have app.py; rank picks b's
+    assert {s["name"] for s in g.explain_file("*", "app.py")["symbols"]} >= {"only_in_a", "only_in_b"}
+    assert mcp_server.get_graph() is g               # wired into the server
+
+
+def test_reindex_star_refreshes_all_repos(tmp_path):
+    from cbm_memory import mcp_server
+    a = make_repo(tmp_path / "a", {"x.py": "def ax():\n    pass\n"})
+    b = make_repo(tmp_path / "b", {"y.py": "def by():\n    pass\n"})
+    g = mcp_server.index_repositories([str(a), str(b)])
+    assert g.search_codebase_memory("*", "newinb") == []
+    (b / "z.py").write_text("def newinb():\n    pass\n")
+    run_git(b, "add", "-A")
+    run_git(b, "commit", "-q", "-m", "feat: newinb")
+    out = g.reindex("*")
+    assert out["changed"] >= 1
+    assert {s["name"] for s in g.search_codebase_memory("*", "newinb")} == {"newinb"}
+
+
+def test_read_results_cached_until_mutation(tmp_path):
+    repo = make_repo(tmp_path, {"app.py": "def one():\n    pass\n"})
+    g = graph_for(repo)
+    r1 = g.get_codebase_context("*", "one")
+    r2 = g.get_codebase_context("*", "one")
+    assert r1 is r2                      # memoized (same object), not recomputed
+    g.reindex("*")                       # mutation invalidates
+    r3 = g.get_codebase_context("*", "one")
+    assert r3 is not r1
 
 
 # ---------- token safety: tool outputs are bounded (agent context = budget) ----------

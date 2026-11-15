@@ -54,6 +54,20 @@ def locked(fn):
     return wrapper
 
 
+def cached(fn):
+    """Memoize read results (agent context tokens: repeated identical calls
+    replay the same object). Invalidated on every mutation (load/reindex)."""
+    @functools.wraps(fn)
+    def wrapper(self, *a, **kw):
+        key = (fn.__name__, a, tuple(sorted(kw.items())))
+        if key in self._cache:
+            return self._cache[key]
+        out = fn(self, *a, **kw)
+        self._cache[key] = out
+        return out
+    return wrapper
+
+
 def _file_key(key: str) -> str | None:
     """Map a node key to its file key (symbol|repo|path|name -> file|repo|path)."""
     parts = key.split("|")
@@ -72,6 +86,7 @@ class GitNexusGraph:
         self.db.row_factory = sqlite3.Row
         self.db.executescript(_SCHEMA)
         self._rank: dict[str, dict[str, float]] = {}  # repo -> file key -> pagerank
+        self._cache: dict = {}
 
     # ---------- write ----------
     @locked
@@ -101,6 +116,7 @@ class GitNexusGraph:
         self.db.execute("INSERT OR REPLACE INTO repo_meta VALUES (?,?,?,?)",
                         (repo, repo, index.get("head_sha", ""), index.get("indexed_at", "")))
         self._recompute_rank(repo)
+        self._cache = {}
         self.db.commit()
 
     def _load_commit(self, repo: str, c: dict) -> None:
@@ -184,6 +200,7 @@ class GitNexusGraph:
         return sorted(pairs)
 
     @locked
+    @cached
     def explain_file(self, repo: str, path: str) -> dict:
         frow = self.db.execute(
             "SELECT key, name FROM nodes WHERE kind='file' AND name=?", (path,)).fetchone()
@@ -201,6 +218,7 @@ class GitNexusGraph:
         return {"path": path, "symbols": [dict(r) for r in symrows], "commits": commits}
 
     @locked
+    @cached
     def team_activity(self, repo: str) -> list[dict]:
         rows = self.db.execute(
             "SELECT n.name AS author_name, COUNT(*) AS commits FROM edges e "
@@ -209,12 +227,13 @@ class GitNexusGraph:
         return [dict(r) for r in rows]
 
     @locked
+    @cached
     def get_codebase_context(self, repo: str, query: str, top_k: int = 5) -> dict:
         words = query.lower().split()
-        tokens: dict[str, set[str]] = {}
+        tokens: dict[tuple, set[str]] = {}
         for r in self.db.execute(
-                "SELECT name, path, meta AS kind FROM nodes WHERE kind='symbol'"):
-            tokens.setdefault(r["path"], set()).add(r["name"].lower())
+                "SELECT repo, name, path, meta AS kind FROM nodes WHERE kind='symbol'"):
+            tokens.setdefault((r["repo"], r["path"]), set()).add(r["name"].lower())
 
         def hits(word: str, tok: str) -> float:
             # exact symbol-name match outranks substring containment
@@ -226,7 +245,7 @@ class GitNexusGraph:
         maxpr = max(rank.values()) if rank else 0.0
         scored = []
         for r in self.db.execute("SELECT name, repo FROM nodes WHERE kind='file'"):
-            toks = tokens.get(r["name"], set()) | {r["name"].lower()}
+            toks = tokens.get((r["repo"], r["name"]), set()) | {r["name"].lower()}
             lexical = sum(hits(w, t) for w in words for t in toks)
             pr = rank.get(f"file|{r['repo']}|{r['name']}", 0.0)
             boost = 1.0 + BOOST * (pr / maxpr if maxpr else 0.0)
@@ -239,6 +258,7 @@ class GitNexusGraph:
         return {"repo": repo, "top_files": top, "recent_commits": recent}
 
     @locked
+    @cached
     def search_codebase_memory(self, repo: str, text: str) -> list[dict]:
         rows = [dict(r) for r in self.db.execute(
             "SELECT name, path, meta AS kind FROM nodes "
@@ -265,6 +285,7 @@ class GitNexusGraph:
         return out[:20]
 
     @locked
+    @cached
     def find_callers(self, repo: str, symbol: str) -> list[dict]:
         keys = [r["key"] for r in self.db.execute(
             "SELECT key FROM nodes WHERE kind='symbol' AND name=?", (symbol,)).fetchall()]
@@ -287,6 +308,7 @@ class GitNexusGraph:
         return sorted(out, key=lambda x: (x["path"], x["caller"]))[:50]
 
     @locked
+    @cached
     def change_impact(self, repo: str, path: str) -> dict:
         # repo param is advisory (clients pass their startup string, e.g. ".");
         # the graph is keyed by resolved path, so resolve the file node by path.
@@ -368,21 +390,27 @@ class GitNexusGraph:
 
     @locked
     def reindex(self, repo: str) -> dict:
+        if repo in ("*", ""):
+            rows = self.db.execute("SELECT path, sha FROM repo_meta").fetchall()
+        else:  # match repo key exactly, or the client's startup string (path)
+            rows = self.db.execute(
+                "SELECT path, sha FROM repo_meta WHERE repo=? OR path=?",
+                (repo, repo)).fetchall() or self.db.execute(
+                "SELECT path, sha FROM repo_meta LIMIT 1").fetchall()
+        total = 0
+        last_sha = None
+        for row in rows or []:
+            total += self._reindex_one(row["path"], row["sha"])
+            last_sha = self.db.execute(
+                "SELECT sha FROM repo_meta WHERE path=?", (row["path"],)).fetchone()["sha"]
+        return {"repo": repo, "changed": total, "indexed_commit": last_sha}
+
+    def _reindex_one(self, repo_path_str: str, old_sha: str) -> int:
         from .repoindex import IGNORE_PARTS, index_one, list_files
 
-        # match repo key exactly, or by the client's startup string (path),
-        # else fall back to the only indexed repo (v1 is single-repo).
-        row = self.db.execute(
-            "SELECT path, sha FROM repo_meta WHERE repo=? OR path=?",
-            (repo, repo)).fetchone()
-        if not row:
-            row = self.db.execute(
-                "SELECT path, sha FROM repo_meta LIMIT 1").fetchone()
-        if not row:
-            return {"repo": repo, "changed": 0, "indexed_commit": None}
-        repo_path = pathlib.Path(row["path"])
+        repo_path = pathlib.Path(repo_path_str)
         repo_key = str(repo_path)
-        old_sha = row["sha"]
+        self._cache = {}
 
         def git(*a: str) -> str:
             return subprocess.run(["git", *a], cwd=repo_path, check=True,
@@ -423,7 +451,7 @@ class GitNexusGraph:
                         (new_sha, _dt.datetime.now(_dt.timezone.utc).isoformat(), repo_key))
         self._recompute_rank(repo_key)
         self.db.commit()
-        return {"repo": repo_key, "changed": applied, "indexed_commit": new_sha}
+        return applied
 
     def _load_entry(self, repo: str, entry: dict, files_set: set[str]) -> None:
         """Current-state write for one file (reindex path)."""

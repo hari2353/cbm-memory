@@ -112,30 +112,48 @@ def available() -> bool:
     return get_parser is not None
 
 
-def _query(lang: str, kind: str):
-    """Compile and cache a query; None when the language/table has no such
-    query or the grammar rejects it (that language then contributes nothing)."""
+def _patterns(src: str) -> list[str]:
+    """Split a query table into complete patterns; a pattern may wrap across
+    lines, so split when parentheses balance (a new pattern starts at '(')."""
+    out, buf, depth = [], "", 0
+    for ln in src.splitlines():
+        buf = (buf + " " + ln.strip()).strip()
+        depth += ln.count("(") - ln.count(")")
+        if depth == 0 and buf:
+            out.append(" ".join(buf.split()))
+            buf = ""
+    return [p for p in out if p]
+
+
+def _query(lang: str, kind: str) -> list:
+    """Compile a table's patterns individually and cache the working ones.
+    Grammars drift between pack versions; one bad node type must not kill a
+    whole language, so each pattern compiles on its own."""
     key = (lang, kind)
     if key not in _queries:
         table = {"def": _DEF_QUERIES, "call": _CALL_QUERIES, "import": _IMPORT_QUERIES}[kind]
         src = table.get(lang)
         if src is None:
-            _queries[key] = None
+            _queries[key] = []
         else:
-            try:
-                _queries[key] = Query(get_language(lang), src)
-            except Exception:
-                _queries[key] = None
+            out = []
+            for pat in _patterns(src):
+                try:
+                    out.append(Query(get_language(lang), pat))
+                except Exception:
+                    pass
+            _queries[key] = out
     return _queries[key]
 
 
-def _captures(q, root) -> dict[str, list]:
-    res = QueryCursor(q).captures(root)
-    if isinstance(res, dict):
-        return res
+def _captures(queries: list, root) -> dict[str, list]:
     out: dict[str, list] = {}
-    for node, name in res:
-        out.setdefault(name, []).append(node)
+    for q in queries:
+        res = QueryCursor(q).captures(root)
+        items = res.items() if isinstance(res, dict) else (
+            (name, [node]) for node, name in res)
+        for name, nodes in items:
+            out.setdefault(name, []).extend(nodes)
     return out
 
 
@@ -167,7 +185,7 @@ def extract_symbols(path: str, src: bytes) -> list[tuple[str, str]]:
     """[(kind, name)] in AST order; kinds: function | class."""
     lang = _lang_for(path)
     q = _query(lang, "def") if lang else None
-    if lang is None or get_parser is None or q is None:
+    if lang is None or get_parser is None or not q:
         raise LookupError(f"no tree-sitter symbols for {path}")
     caps = _captures(q, get_parser(lang).parse(src).root_node)
     out = [( "function", _text(n, src)) for n in caps.get("fn", [])]
@@ -185,7 +203,7 @@ def extract_calls(path: str, src: bytes) -> list[tuple[str | None, str]]:
     Languages without a call query contribute no calls (fail-soft)."""
     lang = _lang_for(path)
     q = _query(lang, "call") if lang else None
-    if lang is None or get_parser is None or q is None:
+    if lang is None or get_parser is None or not q:
         return []
     root = get_parser(lang).parse(src).root_node
     defs = _pair_defs(_captures(_query(lang, "def"), root), src) if _query(lang, "def") else []
@@ -202,7 +220,7 @@ def extract_imports(path: str, src: bytes) -> list[str]:
     Languages without an import query contribute no imports (fail-soft)."""
     lang = _lang_for(path)
     q = _query(lang, "import") if lang else None
-    if lang is None or get_parser is None or q is None:
+    if lang is None or get_parser is None or not q:
         return []
     caps = _captures(q, get_parser(lang).parse(src).root_node)
     mods = [_text(n, src) for n in caps.get("mod", [])]

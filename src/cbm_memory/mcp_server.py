@@ -1,7 +1,9 @@
 """MCP server (T01): FastMCP tools backed by the in-process GitNexusGraph.
-Run:  python -m cbm_memory.mcp_server            # stdio
+Run:  python -m cbm_memory.mcp_server <repo> [repo2 ...]   # stdio, 1+ repos
 """
 from __future__ import annotations
+
+from concurrent.futures import ThreadPoolExecutor
 
 from .graph import GitNexusGraph
 
@@ -19,14 +21,39 @@ def get_graph() -> GitNexusGraph:
     return _GRAPH
 
 
-def index_repository(repo_path: str) -> dict:
+def index_repositories(paths, workers: int = 4) -> GitNexusGraph:
+    """Index one or more repos (parse phase parallel across repos) into ONE
+    graph; servers may host several repos, tools are repo-agnostic."""
+    import pathlib
+
     from .repoindex import index_repo
-    data = index_repo(repo_path)
-    graph = get_graph() if _GRAPH is not None else GitNexusGraph()
-    graph.load(data)
-    set_graph(graph)
-    return {"indexed": repo_path, "commits": len(data["commits"]),
-            "files": len(data["tree"]), "symbols": len(data["symbols"])}
+
+    paths = [str(pathlib.Path(p).resolve()) for p in paths]
+    if len(paths) == 1:
+        data = [index_repo(paths[0])]
+    else:
+        with ThreadPoolExecutor(max_workers=min(workers, len(paths))) as ex:
+            data = list(ex.map(index_repo, paths))
+    g = GitNexusGraph()
+    for d in data:
+        g.load(d)
+    set_graph(g)
+    return g
+
+
+def index_repository(repo_path: str) -> dict:
+    data = index_repositories([repo_path]).db.execute(
+        "SELECT repo FROM repo_meta ORDER BY indexed_at DESC LIMIT 1").fetchone()
+    graph = get_graph()
+    repo = data["repo"]
+    files = graph.db.execute(
+        "SELECT COUNT(*) FROM nodes WHERE kind='file' AND repo=?", (repo,)).fetchone()[0]
+    symbols = graph.db.execute(
+        "SELECT COUNT(*) FROM nodes WHERE kind='symbol' AND repo=?", (repo,)).fetchone()[0]
+    commits = graph.db.execute(
+        "SELECT COUNT(*) FROM nodes WHERE kind='commit' AND repo=?", (repo,)).fetchone()[0]
+    return {"indexed": repo_path, "commits": commits,
+            "files": files, "symbols": symbols}
 
 
 # ---- tool bodies (tested directly; FastMCP wraps them below) ----
@@ -115,10 +142,11 @@ def main(repo_path: str | None = None) -> None:
         import sys
         repo_path = sys.argv[1] if len(sys.argv) > 1 else None
     if repo_path:
-        from .repoindex import index_repo
-        g = GitNexusGraph()
-        g.load(index_repo(repo_path))
-        set_graph(g)
+        if isinstance(repo_path, (list, tuple)):
+            index_repositories(repo_path)
+        else:
+            import sys
+            index_repositories(sys.argv[1:] or [repo_path])
     build_mcp().run()  # stdio transport
 
 

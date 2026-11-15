@@ -109,6 +109,8 @@ def index_one(repo: pathlib.Path, path: str) -> dict:
     suffix = p.suffix.lower()
     entry: dict = {"path": path, "size": p.stat().st_size, "lang": suffix.lstrip(".") or "text",
                    "symbols": [], "calls": [], "imports": []}
+    if not p.is_file():  # tracked dirs/symlinked dirs (e.g. serde/src/core) are skipped
+        return entry
     if p.stat().st_size > 8_000_000:  # never read huge/binary blobs
         return entry
     raw = p.read_bytes()
@@ -148,7 +150,7 @@ def index_repo(repo: str | pathlib.Path) -> dict:
             if "\x1f" in line:
                 if last_head is not None:
                     head, files = last_head
-                    sha, an, ae, at, subject = head.split("\x1f")
+                    sha, an, ae, at, subject = (head.split("\x1f") + [""])[:5]  # empty subject: strip() drops the trailing \x1f
                     commits.append({"sha": sha, "author_name": an, "author_email": ae,
                                     "occurred_at": at, "subject": subject,
                                     "files_changed": "\n".join(files)})
@@ -157,7 +159,7 @@ def index_repo(repo: str | pathlib.Path) -> dict:
                 last_head[1].append(line)
     if last_head is not None:
         head, files = last_head
-        sha, an, ae, at, subject = head.split("\x1f")
+        sha, an, ae, at, subject = (head.split("\x1f") + [""])[:5]  # empty subject: strip() drops the trailing \x1f
         commits.append({"sha": sha, "author_name": an, "author_email": ae,
                         "occurred_at": at, "subject": subject,
                         "files_changed": "\n".join(files)})

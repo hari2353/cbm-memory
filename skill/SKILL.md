@@ -70,6 +70,8 @@ curl -LsSf https://astral.sh/uv/install.sh | sh   # Windows: powershell -c "irm 
 
 ```bash
 claude mcp add codebase-memory -- uvx --from git+https://github.com/hari2353/cbm-memory cbm-memory /absolute/path/to/the/repo
+
+Multiple repos in one server: pass extra paths (`cbm-memory /repo1 /repo2`) — all tools accept any repo (or `"*"` for everything), repos are indexed concurrently.
 ```
 
    Any other MCP client - copy `mcp-config.example.json` (next to this file):
