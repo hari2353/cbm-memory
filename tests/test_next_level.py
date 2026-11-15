@@ -111,7 +111,7 @@ def test_find_callers(tmp_path):
     g = graph_for(repo)
     out = g.find_callers("*", "helper")
     assert {c["path"] for c in out} == {"main.py"}
-    assert {c["caller"] for c in out} == {"run"}
+    assert out[0]["callers"] == ["run"]
 
 
 def test_change_impact_follows_calls_and_imports(tmp_path):
@@ -141,13 +141,14 @@ def test_fts_search_finds_symbols_by_body_words(tmp_path):
     paths = {r["path"] for r in out}
     assert "kafka_consumer.py" in paths
     assert "unrelated.py" not in paths
-    assert all({"name", "path", "kind"} <= set(r) for r in out)
+    assert all({"name", "kind"} <= set(s) for r in out for s in r["symbols"])
 
 
 def test_reindex_picks_up_new_commits(tmp_path):
     repo = make_repo(tmp_path, {"app.py": "def one():\n    pass\n"})
     g = graph_for(repo)
-    assert {s["name"] for s in g.search_codebase_memory("*", "one")} == {"one"}
+    assert {s["name"] for r in g.search_codebase_memory("*", "one")
+            for s in r["symbols"]} == {"one"}
 
     (repo / "two.py").write_text("def two():\n    pass\n")
     (repo / "app.py").unlink()
@@ -156,8 +157,11 @@ def test_reindex_picks_up_new_commits(tmp_path):
 
     out = g.reindex("*")
     assert out["changed"] >= 2
-    assert {s["name"] for s in g.search_codebase_memory("*", "two")} == {"two"}
-    assert {s["name"] for s in g.search_codebase_memory("*", "one")} == set()
+    assert out["changed_files"] and set(out["changed_files"]) >= {"two.py", "app.py"}
+    assert {s["name"] for r in g.search_codebase_memory("*", "two")
+            for s in r["symbols"]} == {"two"}
+    assert {s["name"] for r in g.search_codebase_memory("*", "one")
+            for s in r["symbols"]} == set()
     assert out["indexed_commit"]
     # deleted file: current-state views empty, no crash
     assert g.explain_file("*", "app.py")["symbols"] == []
@@ -207,7 +211,8 @@ def test_reindex_star_refreshes_all_repos(tmp_path):
     run_git(b, "commit", "-q", "-m", "feat: newinb")
     out = g.reindex("*")
     assert out["changed"] >= 1
-    assert {s["name"] for s in g.search_codebase_memory("*", "newinb")} == {"newinb"}
+    assert {s["name"] for r in g.search_codebase_memory("*", "newinb")
+            for s in r["symbols"]} == {"newinb"}
 
 
 def test_read_results_cached_until_mutation(tmp_path):
@@ -260,7 +265,8 @@ def test_find_callers_bounded(tmp_path):
     g = graph_for(repo)
     out = g.find_callers("*", "core")
     assert len(out) <= 50
-    assert out == sorted(out, key=lambda x: (x["path"], x["caller"]))  # deterministic
+    assert out == sorted(out, key=lambda x: (x["repo"], x["path"]))  # deterministic
+    assert all(cs == sorted(cs) for cs in (x["callers"] for x in out))
 
 
 def test_change_impact_bounded_and_flags_truncation(tmp_path):
@@ -356,3 +362,152 @@ def test_team_activity_merges_same_author_across_repos(tmp_path):
     acts = {r["author_name"]: r for r in g.team_activity("*")}
     assert acts["Same Person"]["commits"] == 2                     # merged, not 1+1 split
     assert acts["Same Person"]["repos"] == 2
+
+
+# ---------- cross-repo intelligence: semantic similarity + PageRank strength ----------
+
+def test_related_prefers_high_pagerank_shared_symbols(tmp_path):
+    """Generic names like 'handler' shouldn't imply sameness: a shared symbol
+    that lives in the other repo's CORE file outranks one in a peripheral file."""
+    from cbm_memory import mcp_server
+    core = "def handler():\n    pass\n"
+    b_files = {"lib/core.py": core}
+    for i in range(25):  # many importers -> core.py gets high PageRank
+        b_files[f"u{i:02d}.py"] = "from lib.core import handler\n\ndef run%d():\n    handler()\n" % i
+    b = make_repo(tmp_path / "b", b_files)
+    c = make_repo(tmp_path / "c", {"tiny.py": "def handler():\n    pass\n"})
+    a = make_repo(tmp_path / "a", {"app.py": "def handler():\n    pass\n"})
+    g = mcp_server.index_repositories([str(a), str(b), str(c)])
+    rel = g.explain_file(str(a), "app.py")["related"]
+    assert rel, "shared handler must surface from b and c"
+    assert rel[0]["repo"] == str(b)          # core-file copy first, not peripheral
+    assert rel[0]["rank"] > rel[-1]["rank"]  # strength is ranked, not flat
+
+
+def test_semantic_related_finds_topic_matches_without_shared_names(tmp_path):
+    """Pollination by TOPIC: repos share vocabulary but no symbol names."""
+    from cbm_memory import mcp_server
+    a = make_repo(tmp_path / "a", {"svc.py": "def do_a():\n    pass\n"})
+    b = make_repo(tmp_path / "b", {"docs/notes.md":
+        "# Notes\nOAuth token refresh grant rotation for the auth service.\n"})
+    (a / "svc.py").write_text(
+        "def do_a():\n    pass\n\n# TODO: refresh token rotation, oauth grant flow\n")
+    run_git(a, "add", "-A")
+    run_git(a, "commit", "-q", "-m", "feat: oauth notes")
+    g = mcp_server.index_repositories([str(a), str(b)])
+    ctx = g.get_codebase_context(str(a), "oauth token refresh grant")
+    assert any(r["repo"] == str(b) and r["path"] == "docs/notes.md"
+               for r in ctx["related"]), "topic match in other repo must surface"
+    # scoped fallback: no lexical hit in repo a for that query -> semantic top_files
+    assert ctx["top_files"], "semantic fallback must answer inside the repo too"
+
+
+def test_search_semantic_fallback(tmp_path):
+    from cbm_memory import mcp_server
+    a = make_repo(tmp_path / "a", {"svc.py": "def do_a():\n    pass\n"})
+    (a / "svc.py").write_text("def do_a():\n    pass\n  # rate limiter bucket refill algorithm\n")
+    run_git(a, "add", "-A")
+    run_git(a, "commit", "-q", "-m", "feat: limiter")
+    g = mcp_server.index_repositories([str(a)])
+    hits = g.search_codebase_memory("*", "limiter refill")
+    assert hits and any(s["name"] == "do_a" for r in hits for s in r["symbols"])
+
+
+def test_tool_calls_survive_partial_args(tmp_path):
+    """Any model may omit optional args - tools must default, not error."""
+    import inspect
+
+    from cbm_memory import mcp_server
+    a = make_repo(tmp_path, {"x.py": "def one():\n    pass\n"})
+    mcp_server.index_repositories([str(a)])
+    for name in ("get_codebase_context", "search_codebase_memory", "explain_file",
+                 "team_activity", "find_callers", "change_impact", "reindex"):
+        fn = getattr(mcp_server, name)
+        sig = inspect.signature(fn)
+        if name != "team_activity":
+            assert all(p.default is not inspect.Parameter.empty
+                       for n, p in sig.parameters.items()
+                       if n not in ("ctx",)) or n in (), name
+    assert mcp_server.get_codebase_context(ctx=None, query="one")["top_files"]
+    assert mcp_server.search_codebase_memory(ctx=None, query="one")
+    assert mcp_server.explain_file(ctx=None, path="x.py")["symbols"]
+
+
+def test_restart_reloads_graph_from_cache(tmp_path, monkeypatch):
+    """Model/client switch restarts the server: reload from disk, no re-parse."""
+    from cbm_memory import mcp_server
+    cache = tmp_path / "cache"
+    monkeypatch.setenv("XDG_CACHE_HOME", str(cache))
+    a = make_repo(tmp_path / "a", {"x.py": "def one():\n    pass\n"})
+    b = make_repo(tmp_path / "b", {"y.py": "def two():\n    pass\n"})
+    g1 = mcp_server.index_repositories([str(a), str(b)], cache_dir=str(cache))
+    t1 = g1.db.execute("SELECT indexed_at FROM repo_meta WHERE path=?", (str(a),)).fetchone()[0]
+    g2 = mcp_server.index_repositories([str(a), str(b)], cache_dir=str(cache))
+    t2 = g2.db.execute("SELECT indexed_at FROM repo_meta WHERE path=?", (str(a),)).fetchone()[0]
+    assert t1 == t2, "second startup must hit the cache, not re-index"
+    assert {s["name"] for r in g2.search_codebase_memory("*", "one") for s in r["symbols"]} == {"one"}
+    assert g2.explain_file("*", "x.py")["symbols"]
+
+
+def test_restart_after_new_commit_applies_incremental(tmp_path, monkeypatch):
+    from cbm_memory import mcp_server
+    cache = tmp_path / "cache"
+    monkeypatch.setenv("XDG_CACHE_HOME", str(cache))
+    a = make_repo(tmp_path / "a", {"x.py": "def one():\n    pass\n"})
+    g1 = mcp_server.index_repositories([str(a)], cache_dir=str(cache))
+    (a / "z.py").write_text("def fresh():\n    pass\n")
+    run_git(a, "add", "-A")
+    run_git(a, "commit", "-q", "-m", "feat: fresh")
+    g2 = mcp_server.index_repositories([str(a)], cache_dir=str(cache))
+    assert {s["name"] for r in g2.search_codebase_memory("*", "fresh") for s in r["symbols"]} == {"fresh"}
+
+
+def test_restart_with_dirty_worktree_reindexes(tmp_path, monkeypatch):
+    from cbm_memory import mcp_server
+    cache = tmp_path / "cache"
+    monkeypatch.setenv("XDG_CACHE_HOME", str(cache))
+    a = make_repo(tmp_path / "a", {"x.py": "def one():\n    pass\n"})
+    mcp_server.index_repositories([str(a)], cache_dir=str(cache))
+    (a / "x.py").write_text("def uncommitted():\n    pass\n")
+    g2 = mcp_server.index_repositories([str(a)], cache_dir=str(cache))
+    assert {s["name"] for r in g2.search_codebase_memory("*", "uncommitted") for s in r["symbols"]} == {"uncommitted"}
+
+
+def test_cache_isolated_per_repo_set_and_corrupt_file_rebuilds(tmp_path, monkeypatch):
+    from cbm_memory import mcp_server
+    cache = tmp_path / "cache"
+    monkeypatch.setenv("XDG_CACHE_HOME", str(cache))
+    a = make_repo(tmp_path / "a", {"x.py": "def one():\n    pass\n"})
+    b = make_repo(tmp_path / "b", {"y.py": "def two():\n    pass\n"})
+    mcp_server.index_repositories([str(a)], cache_dir=str(cache))
+    mcp_server.index_repositories([str(b)], cache_dir=str(cache))
+    files = list(cache.rglob("*.db"))
+    assert len(files) == 2, "different repo sets must not share one cache"
+    files[0].write_bytes(b"not a database")
+    g = mcp_server.index_repositories([str(a)], cache_dir=str(cache))
+    assert {s["name"] for r in g.search_codebase_memory("*", "one")
+            for s in r["symbols"]} == {"one"}
+
+
+def test_multi_repo_edge_cases(tmp_path, monkeypatch):
+    """Duplicate paths, vanished repos, dead repo args, unicode names."""
+    from cbm_memory import mcp_server
+    cache = tmp_path / "cache"
+    monkeypatch.setenv("XDG_CACHE_HOME", str(cache))
+    a = make_repo(tmp_path / "a", {"café/ünïcode.py": "def héllo():\n    pass\n"})
+    b = make_repo(tmp_path / "b", {"deep/nest/edge.py": "def edge_sym():\n    pass\n"})
+    g = mcp_server.index_repositories([str(a), str(a), str(b)], cache_dir=str(cache))
+    assert {s["name"] for r in g.search_codebase_memory("*", "héllo") for s in r["symbols"]} == {"héllo"}
+    assert len(g.db.execute("SELECT DISTINCT repo FROM repo_meta").fetchall()) == 2
+    gone = tmp_path / "vanished"
+    gone.mkdir()
+    (gone / "keep.txt").write_text("x")
+    g2 = mcp_server.index_repositories([str(gone), str(b)], cache_dir=str(cache))
+    assert {s["name"] for r in g2.search_codebase_memory("*", "edge_sym") for s in r["symbols"]} == {"edge_sym"}
+    # weird repo args never crash the tools
+    for arg in ("", "*", "no/such/repo", "/definitely/not/a/repo"):
+        g2.get_codebase_context(arg, "edge")
+        g2.search_codebase_memory(arg, "edge")
+        g2.explain_file(arg, "deep/nest/edge.py")
+        g2.change_impact(arg, "deep/nest/edge.py")
+        g2.reindex(arg)

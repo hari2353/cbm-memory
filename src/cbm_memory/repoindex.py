@@ -37,10 +37,32 @@ def _git(repo: pathlib.Path, *args: str) -> str:
     return out.stdout
 
 
+def head_and_dirty(repo: str | pathlib.Path) -> tuple[str, bool]:
+    """(HEAD sha, working tree has uncommitted changes) - cache freshness check."""
+    r = pathlib.Path(repo)
+    sha = _git(r, "rev-parse", "HEAD").strip()
+    dirty = bool(_git(r, "status", "--porcelain").strip())
+    return sha, dirty
+
+
+def _unquote(p: str) -> str:
+    """git quotes exotic paths (C-style, inside double quotes); decode them."""
+    if len(p) > 1 and p.startswith('"') and p.endswith('"'):
+        body = p[1:-1]
+        return re.sub(r"\\(?:([0-7]{3})|(.))",
+                      lambda m: chr(int(m.group(1), 8)) if m.group(1) else
+                      {"n": "\n", "t": "\t", "\\": "\\", '"': '"'}.get(m.group(2), m.group(2)),
+                      body)
+    return p
+
+
 def list_files(repo: pathlib.Path) -> list[str]:
-    ls = _git(repo, "ls-files", "-co", "--exclude-standard")
+    # core.quotePath=false keeps non-ASCII names raw; _unquote still handles
+    # paths containing quotes/backslashes/control chars
+    ls = _git(repo, "-c", "core.quotePath=false", "ls-files", "-co", "--exclude-standard")
     out = []
     for p in ls.splitlines():
+        p = _unquote(p)
         if p and not (set(pathlib.PurePosixPath(p).parts) & IGNORE_PARTS):
             out.append(p)
     return out

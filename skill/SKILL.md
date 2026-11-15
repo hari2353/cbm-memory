@@ -22,27 +22,36 @@ reading it.
 
 | Tool | Call when | Args | Returns |
 |---|---|---|---|
-| `get_codebase_context` | Default entry point for any work question ("where do I add X", "how does checkout work") | `repo="*"`, `query` (2-4 keywords) | `{"top_files": [{path, rank}], "recent_commits": [{subject, occurred_at}]}` |
-| `search_codebase_memory` | Find symbols by name fragment ("where is the OrderProcessor class"), or words from file contents | `repo="*"`, `query` | `[{name, path, kind}]` |
-| `explain_file` | History/ownership of one file ("who's been changing this file") | `repo="*"`, `path` (repo-relative) | `{path, symbols, commits: [{subject, author_name, occurred_at}]}` |
-| `team_activity` | Contributor overview | `repo="*"` | `[{author_name, commits}]` |
-| `find_callers` | "Who calls `helper()`" before changing its signature | `repo="*"`, `symbol` (exact name) | `[{caller, path}]` |
-| `change_impact` | "What breaks if I edit this file" - blast radius before a refactor | `repo="*"`, `path` | `{"root", "symbols", "impacted": [{path, depth}]}` |
-| `reindex` | After new commits/edits during a long session (cheaper than restarting the server) | `repo="*"` | `{"changed", "indexed_commit"}` |
+| `get_codebase_context` | Default entry point for any work question ("where do I add X", "how does checkout work") | `repo="*"`, `query` (2-4 keywords) | `{"top_files": [{path, repo, rank, symbols(≤5 inline), via?, match?}], "related": [{path, repo, rank, via?}], "recent_commits": [{subject, occurred_at}]}` |
+| `search_codebase_memory` | Find symbols by name fragment ("where is the OrderProcessor class"), or words from file contents; offline semantic fallback last | `repo="*"`, `query` | `[{repo, path, symbols: [{name, kind}]}]` (grouped per file) |
+| `explain_file` | History/ownership of one file ("who's been changing this file") | `repo="*"`, `path` (repo-relative) | `{path, repo, repos, symbols, commits: [{subject, author_name, occurred_at}], total_commits, truncated, related: [{repo, name, path, rank}]}` |
+| `team_activity` | Contributor overview (same person across repos merged) | `repo="*"` | `[{author_name, commits, repos}]` |
+| `find_callers` | "Who calls `helper()`" before changing its signature | `repo="*"`, `symbol` (exact name) | `[{repo, path, callers: [...]}]` (grouped per file, ≤50 callers) |
+| `change_impact` | "What breaks if I edit this file" - blast radius before a refactor | `repo="*"`, `path` | `{"root", "symbols", "impacted": [{path, depth}], truncated}` |
+| `reindex` | After new commits/edits during a long session (cheaper than restarting the server) | `repo="*"` | `{"changed", "indexed_commit", "changed_files": [≤20], "truncated"}` |
 
 Notes:
 
-- `repo` is a required argument; `"*"` matches whatever this server indexed
-  and is always the right value (one server hosts one repo).
+- All args are optional; defaults shown. `"*"` matches everything this server
+  indexed. One server may host several repos — see the install section below.
 - The graph is a snapshot from server start + `reindex` calls. After heavy
-  changes, call `reindex` - no restart needed.
+  changes, call `reindex` - no restart needed. Restarts are cheap anyway:
+  the graph is cached on disk per repo set and reloads in ~1s, then git
+  incrementals are applied for repos whose HEAD moved or worktree is dirty.
+- `top_files` ships each hit's top symbol names inline (`symbols`) and `via`
+  shows which of your query words matched - usually no follow-up call needed.
+  Cross-repo: a specific `repo` scopes `top_files` to it and returns
+  `related` = best hits from your OTHER repos (PageRank x name-specificity
+  weighted; treat as leads, not proof). `explain_file.related` lists the same
+  symbol name defined in other repos, strongest first.
 - Symbols come from tree-sitter (offline grammars) for Python, JS/TS/TSX,
   Go, Rust, Java, C/C++, Ruby, PHP; Markdown headings are regex. Call and
   import edges are name-level: a callee name matching several symbols links
   all of them (recall over precision).
 - `search_codebase_memory` first does a symbol `LIKE %fragment%` match;
-  if nothing matches it falls back to full-text search over file bodies and
-  returns the symbols of the best-matching files. Shorter fragments match more.
+  if nothing matches it falls back to full-text search over file bodies, then
+  to offline semantic similarity (hashed n-gram TF-IDF - no network, no
+  embedding models). Shorter fragments match more.
 - `get_codebase_context` ranks files by lexical match × PageRank over
   import/call edges, so widely-imported hub files win ties.
 - `find_callers` takes the exact symbol name; `change_impact` takes the

@@ -49,9 +49,10 @@ def main(paths: list[str]) -> None:
     rows = g.search_codebase_memory("*", "auth")
     by_repo: dict[str, list[str]] = {}
     for r in rows[:20]:
-        by_repo.setdefault(Path(r["repo"]).name, []).append(r["name"])
-    for repo, syms in by_repo.items():
-        print(f"  {repo}: {', '.join(syms[:5])}")
+        by_repo.setdefault(Path(r["repo"]).name, []).append(
+            f"{r['path']}: {[s['name'] for s in r['symbols'][:3]]}")
+    for repo, paths in list(by_repo.items())[:8]:
+        print(f"  {repo}: {paths[:2]}")
 
     print("\n===== Q3: working IN one repo, what do my OTHER repos say? =====")
     probe = next(p for n, p in names.items() if n == "auth-gateway")
@@ -64,9 +65,11 @@ def main(paths: list[str]) -> None:
     cand = next((n for n, rs in shared
                  if not n.startswith("__") and len(rs) >= 4), None)
     if cand:
-        rows = [r for r in g.search_codebase_memory("*", cand) if r["kind"] != "heading"]
+        rows = [g0 for g0 in g.search_codebase_memory("*", cand)
+                if any(s["kind"] != "heading" for s in g0["symbols"])]
         for r in rows[:6]:
-            print(f"  {cand}: {Path(r['repo']).name}/{r['path']} ({r['kind']})")
+            print(f"  {cand}: {Path(r['repo']).name}/{r['path']} "
+                  f"({[s['kind'] for s in r['symbols'][:1]]})")
 
     print("\n===== Q5: who works across multiple of my repos? =====")
     for a in g.team_activity("*")[:10]:
@@ -75,8 +78,9 @@ def main(paths: list[str]) -> None:
 
     print("\n===== Q6: blast radius question spanning repos =====")
     hit_repos = ("cbm-memory", "graph-memory-platform", "skills-engine")
-    hits = [r for r in g.search_codebase_memory("*", "index")
-            if Path(r["repo"]).name in hit_repos and r["kind"] != "heading"]
+    hits = [g0 for g0 in g.search_codebase_memory("*", "index")
+            if Path(g0["repo"]).name in hit_repos
+            and any(s["kind"] != "heading" for s in g0["symbols"])]
     for r in hits[:3]:
         imp = g.change_impact(r["repo"], r["path"])
         print(f"  {Path(r['repo']).name}/{r['path']}: {len(imp['impacted'])} impacted files")

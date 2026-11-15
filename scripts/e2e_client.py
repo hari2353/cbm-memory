@@ -51,10 +51,11 @@ async def main(repos: list[str]) -> None:
 
             r = payload(await s.call_tool("search_codebase_memory",
                                           {"repo": repo, "query": "test"}))
-            print(f"SEARCH hits: {len(r)}", [h["name"] for h in r][:5])
+            names = [s["name"] for grp in r for s in grp["symbols"]]
+            print(f"SEARCH hits: {len(names)}", names[:5])
             assert isinstance(r, list)
 
-            target = next((h["path"] for h in r if h.get("path", "").endswith(".py")), None)
+            target = next((grp["path"] for grp in r if grp["path"].endswith(".py")), None)
             if target is None:  # fallback: pick any indexed py file via CTX
                 target = next(f["path"] for f in payload(await s.call_tool(
                     "get_codebase_context", {"repo": repo, "query": "0"}))["top_files"])
@@ -66,8 +67,9 @@ async def main(repos: list[str]) -> None:
             print("TEAM:", r)
             assert r
 
-            symbol = payload(await s.call_tool("search_codebase_memory",
-                                               {"repo": repo, "query": "def"}))[0]["name"]
+            symbol = next(s["name"] for grp in payload(await s.call_tool(
+                "search_codebase_memory", {"repo": repo, "query": "def"}))
+                for s in grp["symbols"])
             r = payload(await s.call_tool("find_callers", {"repo": repo, "symbol": symbol}))
             print(f"CALLERS of {symbol}:", r[:3])
             assert isinstance(r, list)
