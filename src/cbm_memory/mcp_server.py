@@ -96,32 +96,43 @@ def build_mcp():
 
     @mcp.tool()
     def get_codebase_context(repo: str, query: str) -> dict:
-        """Relevant files + recent commits for a work query, from repo memory."""
+        """Relevant files + recent commits for a work query, from repo memory.
+repo="*" searches ALL indexed repos (each hit labeled with its repo); a
+specific repo scopes results to it and adds `related`: top hits from your
+OTHER repos (cross-pollination)."""
         return get_graph().get_codebase_context(repo, query)
 
     @mcp.tool()
     def search_codebase_memory(repo: str, query: str) -> list[dict]:
-        """Search indexed symbols by name fragment, then file contents (FTS)."""
+        """Search indexed symbols by name fragment, then file contents (FTS).
+Spans every indexed repo; rows carry `repo` so hits are attributable."""
         return get_graph().search_codebase_memory(repo, query)
 
     @mcp.tool()
     def explain_file(repo: str, path: str) -> dict:
-        """Provenance for one file: its symbols + commits that modified it."""
+        """Provenance for one file: its symbols + commits that modified it.
+If several indexed repos contain the same path, `repo` picks one (others
+listed in `repos`); `related` surfaces the same-named symbols in other
+repos (cross-pollination)."""
         return get_graph().explain_file(repo, path)
 
     @mcp.tool()
     def team_activity(repo: str) -> list[dict]:
-        """Commits per author in the indexed repo(s)."""
+        """Commits per author across the indexed repo(s); the same person
+working in several repos is merged into one row with a `repos` count."""
         return get_graph().team_activity(repo)
 
     @mcp.tool()
     def find_callers(repo: str, symbol: str) -> list[dict]:
-        """Who calls this symbol: caller functions + their files (call graph)."""
+        """Who calls this symbol: caller functions + their files (call graph).
+Searches every indexed repo by symbol name; hits carry `repo`."""
         return get_graph().find_callers(repo, symbol)
 
     @mcp.tool()
     def change_impact(repo: str, path: str) -> dict:
-        """Blast radius of editing a file: symbols + impacted files by depth."""
+        """Blast radius of editing a file: symbols + impacted files by depth.
+Scoped to the file's repo (resolved by `repo` when several repos share
+the path)."""
         return get_graph().change_impact(repo, path)
 
     @mcp.tool()

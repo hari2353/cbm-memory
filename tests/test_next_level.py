@@ -191,7 +191,8 @@ def test_index_repositories_multi_repo(tmp_path):
     g = mcp_server.index_repositories([str(a), str(b)], workers=2)
     ctx = g.get_codebase_context("*", "only_in_b")
     assert ctx["top_files"][0]["path"] == "app.py"   # both have app.py; rank picks b's
-    assert {s["name"] for s in g.explain_file("*", "app.py")["symbols"]} >= {"only_in_a", "only_in_b"}
+    assert {s["name"] for r in (g.explain_file("*", "app.py")["repos"] or [""])
+            for s in g.explain_file(r, "app.py")["symbols"]} >= {"only_in_a", "only_in_b"}
     assert mcp_server.get_graph() is g               # wired into the server
 
 
@@ -286,3 +287,72 @@ def test_mcp_app_registers_seven_tools():
     names = {t.name for t in tools}
     assert names == {"get_codebase_context", "search_codebase_memory", "explain_file",
                      "team_activity", "find_callers", "change_impact", "reindex"}
+
+
+# ---------- cross-repo pollination: one repo's context answers another repo's question ----------
+
+def test_get_codebase_context_scopes_to_repo_and_pollinates(tmp_path):
+    from cbm_memory import mcp_server
+    a = make_repo(tmp_path / "a", {"auth.py": "def sign_jwt():\n    pass\n"})
+    b = make_repo(tmp_path / "b", {"api.py": "def verify_jwt():\n    pass\n"})
+    g = mcp_server.index_repositories([str(a), str(b)])
+    # scoped: a specific repo gets only its own files in top_files, each labeled
+    ctx = g.get_codebase_context(str(a), "jwt")
+    assert ctx["top_files"], "scoped query should hit repo a's auth.py"
+    assert all(t["repo"] == str(a) for t in ctx["top_files"])
+    assert ctx["top_files"][0]["path"] == "auth.py"
+    # pollination: repo b's jwt hit is surfaced under related, labeled
+    assert any(r["repo"] == str(b) and r["path"] == "api.py" for r in ctx["related"])
+    # "*": blend of all repos, labeled so the agent can tell them apart
+    all_ctx = g.get_codebase_context("*", "jwt")
+    assert {t["repo"] for t in all_ctx["top_files"]} == {str(a), str(b)}
+
+
+def test_explain_file_same_path_in_two_repos_not_mixed(tmp_path):
+    from cbm_memory import mcp_server
+    a = make_repo(tmp_path / "a", {"util.py": "def hash_pw():\n    pass\n"})
+    b = make_repo(tmp_path / "b", {"util.py": "def encode_token():\n    pass\ndef hash_pw():\n    pass\n"})
+    g = mcp_server.index_repositories([str(a), str(b)])
+    x = g.explain_file(str(b), "util.py")
+    assert {s["name"] for s in x["symbols"]} == {"encode_token", "hash_pw"}
+    assert x["repo"] == str(b)
+    assert set(x["repos"]) == {str(a), str(b)}                    # both repos own this path
+    # pollination: a symbol defined in BOTH repos surfaces the other repo's copy
+    y = g.explain_file(str(a), "util.py")
+    assert {s["name"] for s in y["symbols"]} == {"hash_pw"}       # only repo a's copy
+    assert any(r["repo"] == str(b) and r["name"] == "hash_pw" for r in y["related"])
+
+
+def test_search_and_find_callers_label_their_repo(tmp_path):
+    from cbm_memory import mcp_server
+    a = make_repo(tmp_path / "a", {"x.py": "def parse_cfg():\n    pass\n"})
+    b = make_repo(tmp_path / "b", {"y.py": "def parse_cfg():\n    pass\n"})
+    g = mcp_server.index_repositories([str(a), str(b)])
+    rows = g.search_codebase_memory("*", "parse_cfg")
+    assert {r["repo"] for r in rows} == {str(a), str(b)}          # cross-repo by name, labeled
+    callers = g.find_callers("*", "parse_cfg")
+    assert all("repo" in c for c in callers)
+
+
+def test_reindex_one_repo_does_not_delete_same_path_symbols_in_another(tmp_path):
+    from cbm_memory import mcp_server
+    a = make_repo(tmp_path / "a", {"util.py": "def hash_pw():\n    pass\n"})
+    b = make_repo(tmp_path / "b", {"util.py": "def encode_token():\n    pass\n"})
+    g = mcp_server.index_repositories([str(a), str(b)])
+    g.reindex(str(a))  # incremental refresh of repo a only
+    names = {s["name"] for s in g.explain_file(str(b), "util.py")["symbols"]}
+    assert names == {"encode_token"}, "repo a's reindex must not touch repo b's util.py symbols"
+
+
+def test_team_activity_merges_same_author_across_repos(tmp_path):
+    from cbm_memory import mcp_server
+    a = make_repo(tmp_path / "a", {"x.py": "def ax():\n    pass\n"})
+    b = make_repo(tmp_path / "b", {"y.py": "def by():\n    pass\n"})
+    run_git(a, "commit", "-q", "--amend", "--reset-author", "-m", "feat: ax",
+            env_user="Same Person", env_email="same@x.io")
+    run_git(b, "commit", "-q", "--amend", "--reset-author", "-m", "feat: by",
+            env_user="Same Person", env_email="same@x.io")
+    g = mcp_server.index_repositories([str(a), str(b)])
+    acts = {r["author_name"]: r for r in g.team_activity("*")}
+    assert acts["Same Person"]["commits"] == 2                     # merged, not 1+1 split
+    assert acts["Same Person"]["repos"] == 2

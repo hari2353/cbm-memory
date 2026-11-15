@@ -71,7 +71,7 @@ curl -LsSf https://astral.sh/uv/install.sh | sh   # Windows: powershell -c "irm 
 ```bash
 claude mcp add codebase-memory -- uvx --from git+https://github.com/hari2353/cbm-memory cbm-memory /absolute/path/to/the/repo
 
-Multiple repos in one server: pass extra paths (`cbm-memory /repo1 /repo2`) — all tools accept any repo (or `"*"` for everything), repos are indexed concurrently.
+Multiple repos in one server: pass extra paths (`cbm-memory /repo1 /repo2`) — all tools accept any repo (or `"*"` for everything), repos are indexed concurrently, and answers can combine repos: hits carry a `repo` label, `get_codebase_context` with a specific repo also returns `related` hits from your other repos, `explain_file` lists same-named symbols across repos in `related`, and `team_activity` merges the same person's commits across repos.
 ```
 
    Any other MCP client - copy `mcp-config.example.json` (next to this file):

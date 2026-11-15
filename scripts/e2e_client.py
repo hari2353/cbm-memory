@@ -28,9 +28,10 @@ def payload(result):
     return json.loads(result.content[0].text)
 
 
-async def main(repo: str) -> None:
+async def main(repos: list[str]) -> None:
+    repo = repos[0]  # focused questions target the first repo; "*" spans all
     params = StdioServerParameters(
-        command=sys.executable, args=["-m", "cbm_memory.mcp_server", repo],
+        command=sys.executable, args=["-m", "cbm_memory.mcp_server", *repos],
         cwd=str(REPO_ROOT))
     async with stdio_client(params) as (read, write):
         async with ClientSession(read, write) as s:
@@ -41,8 +42,12 @@ async def main(repo: str) -> None:
 
             r = payload(await s.call_tool("get_codebase_context",
                                           {"repo": repo, "query": "symbol benchmark"}))
-            print("CTX top_files:", [f["path"] for f in r["top_files"]])
+            if not r["top_files"]:  # tiny repo: no lexical hit for that query
+                r = payload(await s.call_tool("get_codebase_context",
+                                              {"repo": "*", "query": "symbol benchmark"}))
+            print("CTX top_files:", [(f.get("repo", "?").rsplit("/", 1)[-1], f["path"]) for f in r["top_files"]])
             assert r["top_files"] and r["recent_commits"]
+            print("CTX related:", [(f["repo"].rsplit("/", 1)[-1], f["path"]) for f in r["related"]])
 
             r = payload(await s.call_tool("search_codebase_memory",
                                           {"repo": repo, "query": "test"}))
@@ -77,4 +82,4 @@ async def main(repo: str) -> None:
     print("E2E OK: 7-tool wire contract proven over stdio")
 
 
-asyncio.run(main(sys.argv[1]))
+asyncio.run(main(sys.argv[1:]))
