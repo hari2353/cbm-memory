@@ -2,7 +2,7 @@ import json
 
 from git_fixtures import sample_repo
 
-from codebase_memory_mcp.repoindex import index_repo, list_files, scan_symbols
+from cbm_memory.repoindex import index_repo, list_files, scan_symbols
 
 
 def test_list_files_skips_git_dir(sample_repo):

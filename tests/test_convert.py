@@ -1,6 +1,6 @@
 from pathlib import Path
 from unittest.mock import patch, MagicMock
-from codebase_memory_mcp.convert import convert, pdf_to_text, UnsupportedFormat
+from cbm_memory.convert import convert, pdf_to_text, UnsupportedFormat
 
 
 def test_convert_plain_text(tmp_path):
@@ -23,7 +23,7 @@ def test_pdf_to_text_calls_mineru(tmp_path, monkeypatch):
     pdf = tmp_path / "x.pdf"
     pdf.write_bytes(b"%PDF-1.4")
     fake = MagicMock(returncode=0, stdout="# Title\n", stderr="")
-    with patch("codebase_memory_mcp.convert.subprocess.run", return_value=fake) as m:
+    with patch("cbm_memory.convert.subprocess.run", return_value=fake) as m:
         out = pdf_to_text(pdf)
     assert out == "# Title\n"
     m.assert_called_once()

@@ -1,7 +1,7 @@
 import tempfile
 from pathlib import Path
-from codebase_memory_mcp.obsidian import scan_vault, ingest_vault, parse_note
-from codebase_memory_mcp.memorygraph import MemoryGraph
+from cbm_memory.obsidian import scan_vault, ingest_vault, parse_note
+from cbm_memory.memorygraph import MemoryGraph
 
 
 def _make_vault(tmp_path):

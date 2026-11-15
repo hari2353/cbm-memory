@@ -1,5 +1,5 @@
-from codebase_memory_mcp.repoindex import index_repo
-from codebase_memory_mcp.graph import GitNexusGraph
+from cbm_memory.repoindex import index_repo
+from cbm_memory.graph import GitNexusGraph
 
 
 def test_detect_changes_returns_symbols_and_commits(sample_repo):

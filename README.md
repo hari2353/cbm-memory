@@ -1,23 +1,26 @@
 # codebase-memory-mcp
 
 MCP server that turns any local git repo into **codebase memory**: commits,
-files, and symbols projected into a tiny graph (sqlite), exposed as exactly 4
-MCP tools, and (optionally) emitted as
-[graph-memory-platform](https://github.com/hari2353/graph-memory-platform)
-cloudsignals (`codebase.<name>.v1`, CloudEvents 1.0).
+files, symbols, call sites and imports projected into a tiny SQLite graph,
+served over stdio as 7 MCP tools. Everything runs locally — no code, index or
+results ever leave your machine.
 
-Part of the T01/T02 milestone (docs ledger 2026-10-31).
+`mcp-name: io.github.hari2353/codebase-memory-mcp`
 
 ## Tools
 
 | Tool | What it answers |
 |---|---|
-| `get_codebase_context(repo, query)` | relevant files (symbol/name match) + recent commits |
-| `search_codebase_memory(repo, query)` | indexed symbols by name fragment |
+| `get_codebase_context(repo, query)` | most relevant files (symbol match × PageRank over import/call edges) + recent commits |
+| `search_codebase_memory(repo, query)` | symbols by name fragment, then full-text search over file bodies (FTS5) |
 | `explain_file(repo, path)` | file provenance: symbols + commits that modified it |
 | `team_activity(repo)` | commits per author |
+| `find_callers(repo, symbol)` | who calls this symbol — caller functions + files (call graph) |
+| `change_impact(repo, path)` | blast radius of editing a file: impacted files by dependency depth |
+| `reindex(repo)` | incremental refresh from git (diff + status) after new commits |
 
-`repo = "*"` scopes across every indexed repo in the same server.
+`repo = "*"` scopes across every indexed repo in the same server. Pass any
+string the server indexed with (e.g. `.`); keys are resolved server-side.
 
 ## Usage
 
@@ -25,17 +28,17 @@ Part of the T01/T02 milestone (docs ledger 2026-10-31).
 python3.12 -m venv .venv && .venv/bin/pip install -e ".[dev]"
 
 # serve one repo (stdio MCP)
-.venv/bin/python -m codebase_memory_mcp.mcp_server /path/to/repo
+.venv/bin/python -m cbm_memory.mcp_server /path/to/repo
 
-# wire-level proof: spawns the server, calls all 4 tools over stdio
+# wire-level proof: spawns the server, calls all 7 tools over stdio
 .venv/bin/python scripts/e2e_client.py /path/to/repo
 ```
 
-Unit tests: `.venv/bin/python -m pytest -q` (fixture git repos, 12 tests).
+Unit tests: `.venv/bin/python -m pytest -q` (fixture git repos, 38 tests).
 
 ## Signals (graph-memory-platform integration)
 
-`codebase_memory_mcp.signals.to_signals(index, sink)` emits CloudEvents
+`cbm_memory.signals.to_signals(index, sink)` emits CloudEvents
 (`specversion`, `id`, `source`, `type`, `time`, `partitionkey`) shaped for
 `POST /v1/signals:batch`. Sinks: `InMemorySink` (tests) and `GmpHttpSink`
 (real platform). Signal types: `codebase.commit.v1`, `codebase.file_changed.v1`,
@@ -43,6 +46,31 @@ Unit tests: `.venv/bin/python -m pytest -q` (fixture git repos, 12 tests).
 
 ## Design notes
 
-- Symbol scan is regex (py/ts/md), deliberately no tree-sitter: file-level
-  memory cheaply, upgrade path documented in the ledger.
-- venv, crawl/session state, and anything secret never enter the repo.
+- Symbols, calls and imports come from tree-sitter grammars
+  (`tree-sitter-language-pack`, bundled offline) for 11 languages
+  (py/js/ts/tsx/go/rs/java/c/cpp/rb/php); md headings stay regex. Extraction
+  is fail-soft per language and per component — a missing query degrades to
+  the regex scan, never crashes indexing.
+- Callee edges are name-level: a callee name matching several symbols links
+  all of them (recall over precision — v1 trade-off, no scope resolution).
+- Ranking: PageRank (damping 0.85, 20 iters) over import + call edges boosts
+  hub files; exact symbol-name matches outrank substring hits in lexical score.
+- Full-text search is FTS5 with external content + triggers; `reindex`
+  applies git diff/status incrementally and forgets deleted files (modified
+  history is kept).
+- Junk dirs (`build/`, `dist/`, `node_modules/`, `.venv/`, caches…) never
+  enter the index; venv, crawl/session state and secrets never enter the repo.
+
+## How it differs from Serena / GitNexus / codebase-memory (DeusData)
+
+| | this server | Serena (~31k★) | GitNexus (~30k★) | DeusData codebase-memory-mcp |
+|---|---|---|---|---|
+| License | MIT | MIT-ish | **PolyForm-NC (non-commercial)** | MIT |
+| Git history as memory (authors/commits/blast radius) | **yes** | no | no | partial |
+| Setup | `uvx` one line, stdio, no daemon | LSP servers per language | Neo4j/embeddings, heavy | 162 grammars, heavier |
+| Privacy | **all local, sqlite in-process** | local | local | local |
+| Focus | agent memory: where/who/what-changed/who-calls | IDE-grade LSP ops | code exploration UI | broad code ops |
+
+Niche: a zero-setup, privacy-first *memory* layer — structural recall
+(who calls what, what breaks when this changes, who owns this file) rather
+than another language server.

@@ -1,7 +1,7 @@
 from pathlib import Path
-from codebase_memory_mcp.repoindex import index_repo
-from codebase_memory_mcp.graph import GitNexusGraph
-from codebase_memory_mcp.wiring import inject_context
+from cbm_memory.repoindex import index_repo
+from cbm_memory.graph import GitNexusGraph
+from cbm_memory.wiring import inject_context
 
 
 def test_inject_context_returns_files_and_commits(sample_repo):

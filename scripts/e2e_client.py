@@ -1,4 +1,4 @@
-"""E2E proof: spawn the real MCP server over stdio and drive all 4 tools.
+"""E2E proof: spawn the real MCP server over stdio and drive all 7 tools.
 
 Usage: .venv/bin/python scripts/e2e_client.py /path/to/some/repo
 """
@@ -11,6 +11,10 @@ from mcp import ClientSession, StdioServerParameters
 from mcp.client.stdio import stdio_client
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
+
+EXPECTED_TOOLS = {"get_codebase_context", "search_codebase_memory",
+                  "explain_file", "team_activity", "find_callers",
+                  "change_impact", "reindex"}
 
 
 def payload(result):
@@ -26,15 +30,14 @@ def payload(result):
 
 async def main(repo: str) -> None:
     params = StdioServerParameters(
-        command=sys.executable, args=["-m", "codebase_memory_mcp.mcp_server", repo],
+        command=sys.executable, args=["-m", "cbm_memory.mcp_server", repo],
         cwd=str(REPO_ROOT))
     async with stdio_client(params) as (read, write):
         async with ClientSession(read, write) as s:
             await s.initialize()
             tools = [t.name for t in (await s.list_tools()).tools]
-            print("TOOLS:", tools)
-            assert set(tools) == {"get_codebase_context", "search_codebase_memory",
-                                  "explain_file", "team_activity"}, tools
+            print("TOOLS:", sorted(tools))
+            assert set(tools) == EXPECTED_TOOLS, tools
 
             r = payload(await s.call_tool("get_codebase_context",
                                           {"repo": repo, "query": "symbol benchmark"}))
@@ -57,7 +60,21 @@ async def main(repo: str) -> None:
             r = payload(await s.call_tool("team_activity", {"repo": repo}))
             print("TEAM:", r)
             assert r
-    print("E2E OK: wire contract proven over stdio")
+
+            symbol = payload(await s.call_tool("search_codebase_memory",
+                                               {"repo": repo, "query": "def"}))[0]["name"]
+            r = payload(await s.call_tool("find_callers", {"repo": repo, "symbol": symbol}))
+            print(f"CALLERS of {symbol}:", r[:3])
+            assert isinstance(r, list)
+
+            r = payload(await s.call_tool("change_impact", {"repo": repo, "path": target}))
+            print("IMPACT of", target, ":", r["impacted"][:3], "symbols:", len(r["symbols"]))
+            assert {"root", "impacted", "symbols"} <= set(r)
+
+            r = payload(await s.call_tool("reindex", {"repo": repo}))
+            print("REINDEX:", r)
+            assert {"changed", "indexed_commit"} <= set(r)
+    print("E2E OK: 7-tool wire contract proven over stdio")
 
 
 asyncio.run(main(sys.argv[1]))

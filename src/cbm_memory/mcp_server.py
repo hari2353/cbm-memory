@@ -1,5 +1,5 @@
 """MCP server (T01): FastMCP tools backed by the in-process GitNexusGraph.
-Run:  python -m codebase_memory_mcp.mcp_server            # stdio
+Run:  python -m cbm_memory.mcp_server            # stdio
 """
 from __future__ import annotations
 
@@ -47,13 +47,25 @@ def team_activity(ctx=None, repo: str = "*") -> list[dict]:
     return get_graph().team_activity(repo)
 
 
+def find_callers(ctx=None, repo: str = "*", symbol: str = "") -> list[dict]:
+    return get_graph().find_callers(repo, symbol)
+
+
+def change_impact(ctx=None, repo: str = "*", path: str = "") -> dict:
+    return get_graph().change_impact(repo, path)
+
+
+def reindex(ctx=None, repo: str = "*") -> dict:
+    return get_graph().reindex(repo)
+
+
 def build_mcp():
-    """MCP app with the 4 tools (stdio, matches GMP's ≤4-tool rule)."""
+    """MCP app with the 7 tools (stdio)."""
     try:
         from mcp.server.mcpserver import MCPServer          # mcp 2.x
     except ImportError:
         from mcp.server.fastmcp import FastMCP as MCPServer  # mcp 1.x
-    mcp = MCPServer("codebase-memory")
+    mcp = MCPServer("cbm-memory")
 
     @mcp.tool()
     def get_codebase_context(repo: str, query: str) -> dict:
@@ -62,7 +74,7 @@ def build_mcp():
 
     @mcp.tool()
     def search_codebase_memory(repo: str, query: str) -> list[dict]:
-        """Search indexed symbols (functions/classes) by name fragment."""
+        """Search indexed symbols by name fragment, then file contents (FTS)."""
         return get_graph().search_codebase_memory(repo, query)
 
     @mcp.tool()
@@ -74,6 +86,21 @@ def build_mcp():
     def team_activity(repo: str) -> list[dict]:
         """Commits per author in the indexed repo(s)."""
         return get_graph().team_activity(repo)
+
+    @mcp.tool()
+    def find_callers(repo: str, symbol: str) -> list[dict]:
+        """Who calls this symbol: caller functions + their files (call graph)."""
+        return get_graph().find_callers(repo, symbol)
+
+    @mcp.tool()
+    def change_impact(repo: str, path: str) -> dict:
+        """Blast radius of editing a file: symbols + impacted files by depth."""
+        return get_graph().change_impact(repo, path)
+
+    @mcp.tool()
+    def reindex(repo: str) -> dict:
+        """Incremental refresh from git (diff + status) after new commits."""
+        return get_graph().reindex(repo)
 
     @mcp.resource("codebase://indexed")
     def indexed() -> str:

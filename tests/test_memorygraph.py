@@ -1,4 +1,4 @@
-from codebase_memory_mcp.memorygraph import MemoryGraph
+from cbm_memory.memorygraph import MemoryGraph
 
 
 def test_entity_and_episode_roundtrip():

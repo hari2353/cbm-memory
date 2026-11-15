@@ -2,8 +2,8 @@ import pytest
 
 from git_fixtures import sample_repo
 
-from codebase_memory_mcp.repoindex import index_repo
-from codebase_memory_mcp.graph import GitNexusGraph
+from cbm_memory.repoindex import index_repo
+from cbm_memory.graph import GitNexusGraph
 
 
 @pytest.fixture()

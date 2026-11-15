@@ -1,12 +1,12 @@
-from codebase_memory_mcp.repoindex import index_repo
-from codebase_memory_mcp.graph import GitNexusGraph
+from cbm_memory.repoindex import index_repo
+from cbm_memory.graph import GitNexusGraph
 
 
 def test_mcp_tool_wrappers_call_graph(sample_repo):
     import importlib
     g = GitNexusGraph(":memory:")
     g.load(index_repo(sample_repo))
-    from codebase_memory_mcp import mcp_server
+    from cbm_memory import mcp_server
     mcp_server.set_graph(g)
     ctx = mcp_server.get_codebase_context(ctx=None, repo=str(sample_repo), query="greeting")
     assert ctx["repo"] == str(sample_repo)

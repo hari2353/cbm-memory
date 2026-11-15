@@ -1,5 +1,5 @@
-from codebase_memory_mcp.workflow import WorkflowRecorder, to_workflow_signals
-from codebase_memory_mcp.signals import InMemorySink
+from cbm_memory.workflow import WorkflowRecorder, to_workflow_signals
+from cbm_memory.signals import InMemorySink
 
 
 def test_workflow_recorder_flushes_to_sink():

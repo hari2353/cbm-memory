@@ -4,14 +4,16 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "codebase-memory-mcp"
-version = "0.2.0"
+version = "0.3.0"
 description = "Codebase + git graph memory (T01/T02): repos, commits, files, symbols as MCP tools + graph-memory-platform signals"
 requires-python = ">=3.10"
-dependencies = ["mcp>=1.2", "requests>=2.31"]
+# <1.0 pinned: 1.x downloads grammars lazily at runtime (network at parse time
+# would break the uvx zero-setup path); 0.x bundles all grammars in the wheel.
+dependencies = ["mcp>=1.2", "requests>=2.31", "tree-sitter-language-pack>=0.7,<1.0"]
 
 [project.scripts]
 # console script so `uvx --from git+https://github.com/hari2353/codebase-memory-mcp cbm-memory <repo>` works with zero setup
-cbm-memory = "codebase_memory_mcp.mcp_server:main"
+cbm-memory = "cbm_memory.mcp_server:main"
 
 [project.optional-dependencies]
 dev = ["pytest>=7"]
