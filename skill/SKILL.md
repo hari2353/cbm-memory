@@ -47,6 +47,10 @@ Notes:
   import/call edges, so widely-imported hub files win ties.
 - `find_callers` takes the exact symbol name; `change_impact` takes the
   repo-relative path (both tolerate any `repo` string).
+- Outputs are bounded to protect the agent's context: `team_activity` returns
+  the top 50 contributors, `find_callers` up to 50 callers, `change_impact`
+  up to 50 impacted files (with a `truncated` flag), `explain_file` the 20
+  most recent commits, `search_codebase_memory` 20 rows.
 
 ## Setup (per project, run by the agent)
 

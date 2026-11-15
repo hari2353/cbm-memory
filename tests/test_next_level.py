@@ -180,6 +180,60 @@ def test_pagerank_beats_lexical_relevance(tmp_path):
     assert ctx["top_files"][0]["path"] == "hub.py"
 
 
+# ---------- token safety: tool outputs are bounded (agent context = budget) ----------
+
+def test_team_activity_bounded_sorted(tmp_path):
+    repo = make_repo(tmp_path, {"app.py": "def one():\n    pass\n"})
+    for i in range(60):
+        run_git(repo, "commit", "-q", "--allow-empty", "-m", f"c{i}",
+                env_user=f"U{i}", env_email=f"u{i}@x.dev")
+    g = graph_for(repo)
+    out = g.team_activity("*")
+    assert len(out) <= 50
+    counts = [r["commits"] for r in out]
+    assert counts == sorted(counts, reverse=True)  # top contributors first
+
+
+def test_md_heading_strips_anchor(tmp_path):
+    from cbm_memory.repoindex import scan_symbols
+    assert scan_symbols("docs.md", "## Async Tests { #async-tests }\n") == [("heading", "Async Tests")]
+
+
+def test_explain_file_caps_commits(tmp_path):
+    repo = make_repo(tmp_path, {"app.py": "def one():\n    pass\n"})
+    for i in range(24):
+        (repo / "app.py").write_text(f"def one():\n    return {i}\n")
+        run_git(repo, "add", "-A")
+        run_git(repo, "commit", "-q", "-m", f"chore: bump {i}")
+    g = graph_for(repo)  # full index: all 25 commits enter the graph
+    out = g.explain_file("*", "app.py")
+    assert len(out["commits"]) <= 20          # bounded, most recent kept
+    assert {c["subject"] for c in out["commits"]} >= {"chore: bump 23"}
+
+
+def test_find_callers_bounded(tmp_path):
+    files = {"lib.py": "def core():\n    return 1\n"}
+    for i in range(60):
+        files[f"c{i:02d}.py"] = "from lib import core\n\ndef f%d():\n    return core()\n" % i
+    repo = make_repo(tmp_path, files)
+    g = graph_for(repo)
+    out = g.find_callers("*", "core")
+    assert len(out) <= 50
+    assert out == sorted(out, key=lambda x: (x["path"], x["caller"]))  # deterministic
+
+
+def test_change_impact_bounded_and_flags_truncation(tmp_path):
+    files = {"lib.py": "def core():\n    return 1\n"}
+    for i in range(60):
+        files[f"c{i:02d}.py"] = "from lib import core\n\ndef f%d():\n    return core()\n" % i
+    repo = make_repo(tmp_path, files)
+    g = graph_for(repo)
+    out = g.change_impact("*", "lib.py")
+    assert len(out["impacted"]) <= 50
+    assert out["truncated"] is True
+    assert {"root", "impacted", "symbols"} <= set(out)
+
+
 # ---------- wire surface: the new tools exist on the MCP app ----------
 
 def test_mcp_app_registers_seven_tools():

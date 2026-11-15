@@ -23,6 +23,7 @@ CREATE TABLE edges (
 );
 CREATE INDEX edges_dst_rel ON edges(dst, relation);
 CREATE INDEX edges_src_rel ON edges(src, relation);
+CREATE INDEX nodes_kind_name ON nodes(kind, name);
 CREATE TABLE IF NOT EXISTS filetext (
   id INTEGER PRIMARY KEY AUTOINCREMENT, repo TEXT, path TEXT, content TEXT
 );
@@ -194,8 +195,8 @@ class GitNexusGraph:
         commits = [dict(r) for r in self.db.execute(
             """SELECT n.name AS subject, n.meta, e.occurred_at
                FROM edges e JOIN nodes n ON n.key = e.src
-               WHERE e.relation='modified' AND e.dst = ? ORDER BY e.occurred_at DESC""",
-            (frow["key"],))]
+               WHERE e.relation='modified' AND e.dst = ? ORDER BY e.occurred_at DESC LIMIT 20""",
+            (frow["key"],))]  # cap 20: hot files have hundreds of commits (token budget)
         commits = [{**c, **json.loads(c.pop("meta"))} for c in commits]
         return {"path": path, "symbols": [dict(r) for r in symrows], "commits": commits}
 
@@ -203,7 +204,8 @@ class GitNexusGraph:
     def team_activity(self, repo: str) -> list[dict]:
         rows = self.db.execute(
             "SELECT n.name AS author_name, COUNT(*) AS commits FROM edges e "
-            "JOIN nodes n ON n.key = e.src WHERE e.relation='authored' GROUP BY e.src")
+            "JOIN nodes n ON n.key = e.src WHERE e.relation='authored' GROUP BY e.src "
+            "ORDER BY commits DESC LIMIT 50")  # top contributors, bounded (token budget)
         return [dict(r) for r in rows]
 
     @locked
@@ -281,7 +283,8 @@ class GitNexusGraph:
                 if tag not in seen:
                     seen.add(tag)
                     out.append(item)
-        return sorted(out, key=lambda x: (x["path"], x["caller"]))
+        # cap 50: popular symbols have hundreds of callers (token budget)
+        return sorted(out, key=lambda x: (x["path"], x["caller"]))[:50]
 
     @locked
     def change_impact(self, repo: str, path: str) -> dict:
@@ -299,6 +302,7 @@ class GitNexusGraph:
             (f"symbol|{real_repo}|{path}|{s['name']}", 0) for s in syms]
         seen = {k for k, _ in frontier}
         impacted: dict[str, int] = {}
+        truncated = False
         qi = 0
         while qi < len(frontier):
             key, depth = frontier[qi]
@@ -321,9 +325,11 @@ class GitNexusGraph:
                 if fpath not in impacted or depth + 1 < impacted[fpath]:
                     impacted[fpath] = depth + 1
                 frontier.append((fpath_key, depth + 1))
+        ordered = sorted(impacted.items(), key=lambda x: x[1])[:50]  # token budget
+        truncated = len(impacted) > len(ordered)
         return {"repo": repo, "root": path, "symbols": syms,
-                "impacted": [{"path": p, "depth": d}
-                             for p, d in sorted(impacted.items(), key=lambda x: x[1])]}
+                "impacted": [{"path": p, "depth": d} for p, d in ordered],
+                "truncated": truncated}
 
     @locked
     def detect_changes(self, repo: str, changed_files: list[str]) -> dict:

@@ -18,7 +18,7 @@ for suffix, pattern, kind in (
     (".py", r"\bclass\s+([A-Za-z_]\w*)", "class"),
     (".ts", r"(?:export\s+)?(?:async\s+)?function\s+([A-Za-z_$][\w$]*)", "function"),
     (".ts", r"(?:export\s+)?class\s+([A-Za-z_$][\w$]*)", "class"),
-    (".md", r"^#\s+(.{1,120}?)\s*$", "heading"),
+    (".md", r"^#{1,6}\s+(.{1,120}?)(?:\s*\{[^}]*\})?\s*$", "heading"),
 ):
     SYMBOL_RULES.setdefault(suffix, []).append((re.compile(pattern, re.M), kind))
 
@@ -87,6 +87,10 @@ def _resolve_import(mod: str, from_path: str, files: set[str]) -> str | None:
             if base:
                 base = base[:-1]
         cands: list[str] = []
+        if not lead:  # absolute: resolve from the repo root first, file dir as fallback
+            for i in range(len(parts), 0, -1):
+                stem = pathlib.PurePosixPath(*parts[:i])
+                cands += [str(stem) + ".py", str(pathlib.PurePosixPath(*stem.parts, "__init__.py"))]
         for i in range(len(parts), 0, -1):  # deepest package first
             stem_parts = base + parts[:i]
             stem = pathlib.PurePosixPath(*stem_parts)
