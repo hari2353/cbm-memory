@@ -1,4 +1,8 @@
-# codebase-memory-mcp
+# cbm-memory
+
+*(formerly `codebase-memory-mcp` — renamed to avoid the PyPI name collision
+with DeusData's dist; `uvx` URLs may still use the old repo name, GitHub
+redirects it.)*
 
 MCP server that turns any local git repo into **codebase memory**: commits,
 files, symbols, call sites and imports projected into a tiny SQLite graph,

@@ -11,7 +11,7 @@ exposed as 7 MCP tools over stdio. One tool call answers "where is X",
 "who wrote Y", "what changed recently", "who calls Z" or "what breaks if I
 edit this file" - instead of grepping and reading files one by one.
 
-Repo: https://github.com/hari2353/codebase-memory-mcp (MIT)
+Repo: https://github.com/hari2353/cbm-memory (MIT)
 
 ## How the agent should use it
 
@@ -65,7 +65,7 @@ curl -LsSf https://astral.sh/uv/install.sh | sh   # Windows: powershell -c "irm 
    **Claude Code - one command:**
 
 ```bash
-claude mcp add codebase-memory -- uvx --from git+https://github.com/hari2353/codebase-memory-mcp cbm-memory /absolute/path/to/the/repo
+claude mcp add codebase-memory -- uvx --from git+https://github.com/hari2353/cbm-memory cbm-memory /absolute/path/to/the/repo
 ```
 
    Any other MCP client - copy `mcp-config.example.json` (next to this file):
@@ -75,7 +75,7 @@ claude mcp add codebase-memory -- uvx --from git+https://github.com/hari2353/cod
   "mcpServers": {
     "codebase-memory": {
       "command": "uvx",
-      "args": ["--from", "git+https://github.com/hari2353/codebase-memory-mcp", "cbm-memory", "/absolute/path/to/the/repo"]
+      "args": ["--from", "git+https://github.com/hari2353/cbm-memory", "cbm-memory", "/absolute/path/to/the/repo"]
     }
   }
 }
@@ -95,7 +95,7 @@ claude mcp add codebase-memory -- uvx --from git+https://github.com/hari2353/cod
 run locally; repo code, the index and tool results are never uploaded
 anywhere. (No `uv` or prefer explicit installs? Fallback: `python3 -m venv
 ~/.cbm-mcp-venv && ~/.cbm-mcp-venv/bin/pip install
-"git+https://github.com/hari2353/codebase-memory-mcp.git"`, then point the
+"git+https://github.com/hari2353/cbm-memory.git"`, then point the
 MCP client at `~/.cbm-mcp-venv/bin/python -m cbm_memory.mcp_server
 <repo>`.)
 
