@@ -84,6 +84,54 @@ def _file_key(key: str) -> str | None:
     return None
 
 
+def _sccs(adj: dict[str, list[str]]) -> list[list[str]]:
+    """Strongly connected components (iterative Tarjan) - cycle candidates."""
+    index: dict[str, int] = {}
+    low: dict[str, int] = {}
+    on: set[str] = set()
+    stack: list[str] = []
+    out: list[list[str]] = []
+    counter = 0
+    for root in adj:
+        if root in index:
+            continue
+        index[root] = low[root] = counter
+        counter += 1
+        stack.append(root)
+        on.add(root)
+        work: list[tuple[str, object]] = [(root, iter(adj.get(root, ())))]
+        while work:
+            v, it = work[-1]
+            descended = False
+            for w in it:
+                if w not in index:
+                    index[w] = low[w] = counter
+                    counter += 1
+                    stack.append(w)
+                    on.add(w)
+                    work.append((w, iter(adj.get(w, ()))))
+                    descended = True
+                    break
+                if w in on:
+                    low[v] = min(low[v], index[w])
+            if descended:
+                continue
+            work.pop()
+            if work:
+                pv = work[-1][0]
+                low[pv] = min(low[pv], low[v])
+            if low[v] == index[v]:
+                comp = []
+                while True:
+                    w = stack.pop()
+                    on.discard(w)
+                    comp.append(w)
+                    if w == v:
+                        break
+                out.append(comp)
+    return out
+
+
 class GitNexusGraph:
     def __init__(self, path: str = ":memory:"):
         # MCP v2 runs tool bodies in worker threads; keep one shared conn + lock
@@ -306,6 +354,61 @@ class GitNexusGraph:
             "JOIN nodes n ON n.key = e.src WHERE e.relation='authored' GROUP BY n.name "
             "ORDER BY commits DESC LIMIT 50")  # top contributors, bounded (token budget)
         return [dict(r) for r in rows]
+
+    @locked
+    def architecture_report(self, repo: str) -> dict:
+        """Pro: architecture health - import cycles (Tarjan SCC), god files
+        (symbol load x PageRank), layer map, verdict. All sections capped for
+        tokens; see tests/test_pro.py for the shape."""
+        repo_key = self._repo_for(repo)
+        repos = [repo_key] if repo_key else [
+            r["repo"] for r in self.db.execute("SELECT repo FROM repo_meta")]
+        cycles: list[dict] = []
+        god: list[tuple[float, str, int, float]] = []
+        layers: dict[str, dict] = {}
+        nfiles = 0
+        for rp in repos:
+            adj: dict[str, list[str]] = {}
+            for r in self.db.execute(
+                    "SELECT src, dst FROM edges WHERE relation='imports' AND repo=?", (rp,)):
+                s, d = _file_key(r["src"]), _file_key(r["dst"])
+                if s and d and s != d:
+                    adj.setdefault(s, []).append(d)
+            nfiles += self.db.execute(
+                "SELECT COUNT(*) FROM nodes WHERE kind='file' AND repo=?", (rp,)).fetchone()[0]
+            for comp in _sccs(adj):
+                if len(comp) > 1:
+                    names = sorted(k.rsplit("|", 1)[-1] for k in comp)[:12]
+                    cycles.append({"path": " -> ".join(names), "files": len(comp)})
+            ranks = self._rank.get(rp, {})
+            for r in self.db.execute(
+                    "SELECT path, COUNT(*) AS n FROM nodes WHERE kind='symbol' AND repo=? "
+                    "GROUP BY path", (rp,)):
+                rank = ranks.get(f"file|{rp}|{r['path']}", 0.0)
+                god.append((r["n"] * rank, r["path"], r["n"], rank))
+            for r in self.db.execute(
+                    "SELECT path FROM nodes WHERE kind='file' AND repo=?", (rp,)):
+                d = r["path"].split("/")[0] if "/" in r["path"] else "."
+                layers.setdefault(d, {"dir": d, "files": 0, "imports": 0})["files"] += 1
+            for r in self.db.execute(
+                    "SELECT src FROM edges WHERE relation='imports' AND repo=?", (rp,)):
+                s = _file_key(r["src"])
+                if s:
+                    p = s.rsplit("|", 1)[-1]
+                    d = p.split("/")[0] if "/" in p else "."
+                    if d in layers:
+                        layers[d]["imports"] += 1
+        god.sort(key=lambda t: (-t[0], t[1]))
+        return {
+            "repo": repo_key or "*",
+            "files": nfiles,
+            "cycles": sorted(cycles, key=lambda c: (-c["files"], c["path"]))[:5],
+            "truncated": len(cycles) > 5,
+            "god_files": [{"path": p, "symbols": n, "rank": round(rank, 4)}
+                          for _, p, n, rank in god[:5]],
+            "layers": sorted(layers.values(), key=lambda d: (-d["files"], d["dir"]))[:12],
+            "verdict": "tangled" if cycles else "ok",
+        }
 
     def _sem_state(self) -> tuple:
         """Lazy semantic index over all file bodies (invalidated on mutation)."""

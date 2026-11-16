@@ -3,10 +3,12 @@ Run:  python -m cbm_memory.mcp_server <repo> [repo2 ...]   # stdio, 1+ repos
 """
 from __future__ import annotations
 
+import json
 import sqlite3
 import subprocess
 from concurrent.futures import ThreadPoolExecutor
 
+from . import licensing
 from .graph import GitNexusGraph
 
 _GRAPH: GitNexusGraph | None = None
@@ -44,6 +46,12 @@ def index_repositories(paths, workers: int = 4, cache_dir: str | None = None) ->
         print(f"cbm-memory: skipping missing/non-git repo {gone}", file=sys.stderr)
     if not repos:
         raise FileNotFoundError(f"no git repos among {paths}")
+    # free tier fleet cap: truncate BEFORE the cache key so free restarts stay consistent
+    if len(repos) > licensing.FREE_MAX_REPOS:
+        msg = licensing.notice(len(repos))
+        if msg:
+            print(msg, file=sys.stderr)
+            repos = repos[:licensing.FREE_MAX_REPOS]
 
     if cache_dir is None:
         cache_dir = os.environ.get("XDG_CACHE_HOME", str(pathlib.Path.home() / ".cache"))
@@ -80,7 +88,20 @@ def index_repositories(paths, workers: int = 4, cache_dir: str | None = None) ->
                     g.load(d)
         g.warm()
     # freshness: HEAD moved or worktree dirty since the cached snapshot
-    for p in repos:
+    _freshen(g, repos)
+    set_graph(g)
+    return g
+
+
+def _freshen(g: GitNexusGraph, paths) -> list[str]:
+    """HEAD moved or worktree dirty -> incremental reindex; returns changed
+    paths (shared by index_repositories freshness loop and watch_tick)."""
+    import pathlib
+
+    from .repoindex import head_and_dirty
+
+    changed = []
+    for p in [str(pathlib.Path(x).resolve()) for x in paths]:
         try:
             sha, dirty = head_and_dirty(p)
         except subprocess.CalledProcessError:
@@ -88,8 +109,51 @@ def index_repositories(paths, workers: int = 4, cache_dir: str | None = None) ->
         row = g.db.execute("SELECT sha FROM repo_meta WHERE path=?", (p,)).fetchone()
         if row is None or row["sha"] != sha or dirty:
             g.reindex(p)
-    set_graph(g)
-    return g
+            changed.append(p)
+    return changed
+
+
+def watch_tick(g: GitNexusGraph, paths) -> list[str]:
+    """One watch-mode poll: reindex only repos whose HEAD moved / worktree
+    dirty; returns the changed paths (empty = clean, nothing to do)."""
+    return _freshen(g, paths)
+
+
+def watch(paths, interval: float = 2.0) -> None:
+    """Pro: keep N repos fresh - poll git state, reindex what changed.
+    Git-based polling (head_and_dirty), no fs-watcher dependency."""
+    import pathlib
+    import sys
+    import time
+
+    paths = [str(pathlib.Path(p).resolve()) for p in paths]
+    g = index_repositories(paths)
+    print(f"cbm-memory watch: {len(paths)} repo(s), every {interval}s (Ctrl-C stops)",
+          file=sys.stderr)
+    while True:
+        time.sleep(interval)
+        for p in watch_tick(g, paths):
+            print(f"cbm-memory watch: reindexed {p}", file=sys.stderr)
+
+
+def secure_preset(account: str, gateway: str) -> str:
+    """Pro: opencode.json snippet chaining bili (local proxy) x Cloudflare AI
+    Gateway. Provider credentials live in Cloudflare (BYOK/Unified Billing);
+    the client holds only the gateway auth token and requests never leave
+    localhost unauthenticated."""
+    return json.dumps({
+        "$schema": "https://opencode.ai/config.json",
+        "providers": {
+            "anthropic": {
+                "settings": {
+                    "baseURL": (f"http://localhost:8787/bili/"
+                                f"https://gateway.ai.cloudflare.com/v1/{account}/{gateway}/anthropic"),
+                    "apiKey": "{env:ANTHROPIC_API_KEY}",
+                },
+                "headers": {"cf-aig-authorization": "Bearer <CF_AIG_TOKEN>"},
+            }
+        },
+    }, indent=2)
 
 
 def index_repository(repo_path: str) -> dict:
@@ -137,8 +201,11 @@ def reindex(ctx=None, repo: str = "*") -> dict:
     return get_graph().reindex(repo)
 
 
-def build_mcp():
-    """MCP app with the 7 tools (stdio)."""
+def build_mcp(pro: bool | None = None):
+    """MCP app with the 7 free tools; architecture_report joins when licensed
+    (pro=None auto-detects CBM_LICENSE)."""
+    if pro is None:
+        pro = licensing.is_pro()
     try:
         from mcp.server.mcpserver import MCPServer          # mcp 2.x
     except ImportError:
@@ -191,6 +258,13 @@ the path)."""
         """Incremental refresh from git (diff + status) after new commits."""
         return get_graph().reindex(repo)
 
+    if pro:
+        @mcp.tool()
+        def architecture_report(repo: str = "*") -> dict:
+            """Architecture health (Pro): import cycles (Tarjan SCC), god files
+            (symbol load x PageRank), layer map, ok/tangled verdict."""
+            return get_graph().architecture_report(repo)
+
     @mcp.resource("codebase://indexed")
     def indexed() -> str:
         from .graph import _SCHEMA
@@ -200,14 +274,31 @@ the path)."""
 
 
 def main(repo_path: str | None = None) -> None:
+    import sys
+
     if repo_path is None:  # console script (uvx) calls main() with no args
-        import sys
         repo_path = sys.argv[1] if len(sys.argv) > 1 else None
+    if repo_path == "watch":  # Pro CLI: cbm-memory watch <repo> [repo2 ...]
+        if not licensing.is_pro():
+            print("cbm-memory: watch mode is Pro; set CBM_LICENSE", file=sys.stderr)
+            return
+        watch(sys.argv[2:])
+        return
+    if repo_path == "secure":  # Pro CLI: cbm-memory secure <ACCOUNT_ID> <GATEWAY>
+        if not licensing.is_pro():
+            print("cbm-memory: secure preset is Pro; set CBM_LICENSE", file=sys.stderr)
+            return
+        args = sys.argv[2:]
+        if len(args) != 2:
+            print("usage: cbm-memory secure <CLOUDFLARE_ACCOUNT_ID> <GATEWAY_NAME>",
+                  file=sys.stderr)
+            return
+        print(secure_preset(*args))
+        return
     if repo_path:
         if isinstance(repo_path, (list, tuple)):
             index_repositories(repo_path)
         else:
-            import sys
             index_repositories(sys.argv[1:] or [repo_path])
     build_mcp().run()  # stdio transport
 

@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "codebase-memory-mcp"
-version = "0.3.0"
+version = "0.4.0"
 description = "Codebase + git graph memory (T01/T02): repos, commits, files, symbols as MCP tools + graph-memory-platform signals"
 requires-python = ">=3.10"
 # <1.0 pinned: 1.x downloads grammars lazily at runtime (network at parse time

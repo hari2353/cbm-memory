@@ -114,6 +114,26 @@ anywhere. (No `uv` or prefer explicit installs? Fallback: `python3 -m venv
 MCP client at `~/.cbm-mcp-venv/bin/python -m cbm_memory.mcp_server
 <repo>`.)
 
+## Pro (license, offline)
+
+Free tier: all 7 tools, up to 5 repos per server. Setting `CBM_LICENSE`
+(env var, offline ed25519 verification — no phone-home, works under `uvx`)
+unlocks Pro:
+
+- **Fleet mode**: unlimited repos per server (index whole codebases at once).
+- **`architecture_report`** (8th tool): import cycles (Tarjan SCC), god files
+  (symbol load × PageRank), layer map, ok/tangled verdict — one call to see
+  where a codebase is tangled.
+- **`cbm-memory watch /repo1 /repo2`**: keeps the graph fresh in long sessions
+  — polls git HEAD/worktree every 2s, reindexes only what changed.
+- **`cbm-memory secure <ACCOUNT> <GATEWAY>`**: prints an `opencode.json`
+  preset chaining bili × Cloudflare AI Gateway so provider credentials stay
+  in your gateway, not in client configs.
+
+Licenses are issued by the maintainer; email the address in the repo README.
+Without a license everything above falls back to free behavior (cap 5, tool
+hidden, subcommands print a hint) — nothing breaks.
+
 ## Troubleshooting
 
 - Tools missing → server not configured or agent not restarted; recheck the
