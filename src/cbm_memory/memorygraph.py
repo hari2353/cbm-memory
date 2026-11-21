@@ -16,6 +16,21 @@ from __future__ import annotations
 import json
 import sqlite3
 import threading
+from datetime import datetime, timedelta, timezone
+
+
+def _utc(value=None) -> datetime:
+    if value is None:
+        return datetime.now(timezone.utc)
+    if isinstance(value, str):
+        value = datetime.fromisoformat(value.replace("Z", "+00:00"))
+    if value.tzinfo is None:
+        value = value.replace(tzinfo=timezone.utc)
+    return value.astimezone(timezone.utc)
+
+
+def _stamp(value=None) -> str:
+    return _utc(value).isoformat(timespec="microseconds").replace("+00:00", "Z")
 
 
 class MemoryGraph:
@@ -42,6 +57,10 @@ class MemoryGraph:
         CREATE TRIGGER IF NOT EXISTS episodes_ad AFTER DELETE ON episodes BEGIN
             INSERT INTO episodes_fts(episodes_fts, rowid, text) VALUES('delete', old.id, old.text);
         END;
+        CREATE TABLE IF NOT EXISTS working_memory (
+            key TEXT PRIMARY KEY, value TEXT NOT NULL, importance REAL NOT NULL,
+            updated_at TEXT NOT NULL, expires_at TEXT NOT NULL
+        );
         """)
 
     def add_entity(self, key: str, name: str, kind: str = "concept", meta=None) -> None:
@@ -135,6 +154,75 @@ class MemoryGraph:
                 (like, like, limit)).fetchall()
         return [{"key": r["key"], "name": r["name"], "kind": r["kind"],
                  "meta": json.loads(r["meta"])} for r in rows]
+
+    def remember_working(self, key: str, value: str, ttl_seconds: float = 3600,
+                         importance: float = 0.5, now=None) -> None:
+        """Upsert a bounded scratchpad entry that expires after ttl_seconds."""
+        if not ttl_seconds > 0:
+            raise ValueError("ttl_seconds must be > 0")
+        if not 0 <= importance <= 1:
+            raise ValueError("importance must be within [0, 1]")
+        start = _utc(now)
+        with self._lock:
+            self.db.execute(
+                "INSERT INTO working_memory (key, value, importance, updated_at, expires_at) "
+                "VALUES (?,?,?,?,?) ON CONFLICT(key) DO UPDATE SET "
+                "value=excluded.value, importance=excluded.importance, "
+                "updated_at=excluded.updated_at, expires_at=excluded.expires_at",
+                (key, value, importance, _stamp(start),
+                 _stamp(start + timedelta(seconds=ttl_seconds))))
+            self.db.commit()
+
+    def recall_working(self, key: str, now=None) -> dict | None:
+        stamp = _stamp(now)
+        with self._lock:
+            row = self.db.execute(
+                "SELECT key, value, importance, updated_at, expires_at "
+                "FROM working_memory WHERE key=?", (key,)).fetchone()
+            if row is None:
+                return None
+            if row["expires_at"] <= stamp:
+                self.db.execute("DELETE FROM working_memory WHERE key=?", (key,))
+                self.db.commit()
+                return None
+            return dict(row)
+
+    def evict_expired(self, now=None) -> int:
+        with self._lock:
+            cur = self.db.execute(
+                "DELETE FROM working_memory WHERE expires_at <= ?", (_stamp(now),))
+            self.db.commit()
+            return cur.rowcount
+
+    def working_items(self, now=None, limit: int = 20) -> list[dict]:
+        with self._lock:
+            rows = self.db.execute(
+                "SELECT key, value, importance, updated_at, expires_at "
+                "FROM working_memory WHERE expires_at > ? "
+                "ORDER BY importance DESC, updated_at DESC LIMIT ?",
+                (_stamp(now), limit)).fetchall()
+        return [dict(r) for r in rows]
+
+    def promote_working(self, key: str, entity_key: str, source: str = "working",
+                        now=None) -> int | None:
+        """Move a working entry into durable episodes; None if missing/expired."""
+        stamp = _stamp(now)
+        with self._lock:
+            row = self.db.execute(
+                "SELECT value, expires_at FROM working_memory WHERE key=?",
+                (key,)).fetchone()
+            if row is None:
+                return None
+            if row["expires_at"] <= stamp:
+                self.db.execute("DELETE FROM working_memory WHERE key=?", (key,))
+                self.db.commit()
+                return None
+            cur = self.db.execute(
+                "INSERT INTO episodes (entity_key, text, occurred_at, source) "
+                "VALUES (?,?,?,?)", (entity_key, row["value"], stamp, source))
+            self.db.execute("DELETE FROM working_memory WHERE key=?", (key,))
+            self.db.commit()
+            return cur.lastrowid
 
     def close(self) -> None:
         self.db.close()

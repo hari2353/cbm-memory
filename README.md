@@ -65,6 +65,22 @@ Unit tests: `.venv/bin/python -m pytest -q` (fixture git repos, 38 tests).
 - Junk dirs (`build/`, `dist/`, `node_modules/`, `.venv/`, caches…) never
   enter the index; venv, crawl/session state and secrets never enter the repo.
 
+## Three memory tiers
+
+`MemoryGraph` keeps durable entities/episodes plus consolidated observations.
+The working tier is a bounded scratchpad for in-flight agent state:
+
+```python
+g.remember_working("task", "fix auth retry", ttl_seconds=900, importance=0.8)
+g.recall_working("task")        # None once expired
+g.working_items()               # non-expired, importance desc
+g.promote_working("task", "auth-service")   # -> durable episode, scratch row removed
+g.evict_expired()               # sweep count
+```
+
+TTL and importance are validated; timestamps are ISO-8601 UTC and `now=` is
+injectable for deterministic tests. No background sweeper — callers evict.
+
 ## How it differs from Serena / GitNexus / codebase-memory (DeusData)
 
 | | this server | Serena (~31k★) | GitNexus (~30k★) | DeusData codebase-memory-mcp |
