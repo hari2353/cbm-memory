@@ -81,6 +81,21 @@ g.evict_expired()               # sweep count
 TTL and importance are validated; timestamps are ISO-8601 UTC and `now=` is
 injectable for deterministic tests. No background sweeper — callers evict.
 
+## Index + memory footprint
+
+`cbm_memory.footprint` reports the size of the memory an agent carries:
+
+```python
+from cbm_memory.footprint import estimate_index_bytes, summarize_index
+
+summarize_index(index_repo(path))   # files, symbols, call/import edges, commits, estimated_bytes
+graph.footprint()                   # entities, episodes, working items, estimated bytes
+```
+
+Counts are exact; byte figures are order-of-magnitude only. Cross-pollinated
+from Harvard Edge's TinyML-Footprint, applying the same "report your
+footprint" discipline to a codebase memory index.
+
 ## How it differs from Serena / GitNexus / codebase-memory (DeusData)
 
 | | this server | Serena (~31k★) | GitNexus (~30k★) | DeusData codebase-memory-mcp |

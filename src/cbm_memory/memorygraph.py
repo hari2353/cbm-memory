@@ -224,6 +224,20 @@ class MemoryGraph:
             self.db.commit()
             return cur.lastrowid
 
+    def footprint(self) -> dict:
+        """Counts and a rough byte estimate for this memory graph."""
+        with self._lock:
+            entities = self.db.execute("SELECT COUNT(*) FROM entities").fetchone()[0]
+            episodes = self.db.execute("SELECT COUNT(*) FROM episodes").fetchone()[0]
+            working = self.db.execute("SELECT COUNT(*) FROM working_memory").fetchone()[0]
+        estimated_bytes = entities * 120 + episodes * 240 + working * 160
+        return {
+            "entities": entities,
+            "episodes": episodes,
+            "working_items": working,
+            "estimated_bytes": estimated_bytes,
+        }
+
     def close(self) -> None:
         self.db.close()
 
