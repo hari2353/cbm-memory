@@ -18,6 +18,8 @@ import sqlite3
 import threading
 from datetime import datetime, timedelta, timezone
 
+from .context_window import _validate_window
+
 
 def _utc(value=None) -> datetime:
     if value is None:
@@ -136,6 +138,37 @@ class MemoryGraph:
     def context_for(self, key: str, limit: int = 20) -> dict | None:
         """Back-compat read-back (no filter)."""
         return self.recall(key, limit=limit)
+
+    def context_window(self, key: str, *, sinks: int = 2, recent: int = 6) -> dict | None:
+        """Bounded read-back: first ``sinks`` plus last ``recent`` episodes.
+
+        Keeps the attention-sink anchors and the newest window, dropping the
+        middle. Returns the entity, the kept episodes and the omitted count.
+        """
+        _validate_window(sinks, recent)
+        ent = self.get_entity(key)
+        if ent is None:
+            return None
+        with self._lock:
+            head = self.db.execute(
+                "SELECT id, text, occurred_at, source FROM episodes "
+                "WHERE entity_key=? ORDER BY occurred_at ASC, id ASC LIMIT ?",
+                (key, sinks)).fetchall()
+            tail = self.db.execute(
+                "SELECT id, text, occurred_at, source FROM episodes "
+                "WHERE entity_key=? ORDER BY occurred_at DESC, id DESC LIMIT ?",
+                (key, recent)).fetchall()
+            total = self.db.execute(
+                "SELECT COUNT(*) FROM episodes WHERE entity_key=?", (key,)).fetchone()[0]
+        by_id = {row["id"]: row for row in [*head, *tail]}
+        rows = sorted(by_id.values(), key=lambda row: (row["occurred_at"], row["id"]))
+        ent["episodes"] = [
+            {"text": row["text"], "occurred_at": row["occurred_at"], "source": row["source"]}
+            for row in rows
+        ]
+        ent["kept"] = len(rows)
+        ent["omitted"] = total - len(rows)
+        return ent
 
     def reflect(self, key: str) -> dict | None:
         """Mental model: entity + observations + most recent episodes."""
