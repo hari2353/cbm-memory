@@ -39,7 +39,7 @@ def test_ingest_vault_projects_into_memory_graph():
         assert n == 2
         assert g.get_entity("note:note1") is not None
         assert g.get_entity("tag:tag1") is not None
-        ctx = g.context_for("note:note1")
+        ctx = g.recall("note:note1")
         assert ctx is not None and len(ctx["episodes"]) == 1
         g.close()
 

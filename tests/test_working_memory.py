@@ -90,7 +90,7 @@ def test_promote_working_creates_episode_and_removes_row():
     episode_id = g.promote_working("k", "proj", now=NOW)
     assert isinstance(episode_id, int)
     assert g.recall_working("k", now=NOW) is None
-    ctx = g.context_for("proj")
+    ctx = g.recall("proj")
     assert [e["text"] for e in ctx["episodes"]] == ["deployed v2"]
     assert ctx["episodes"][0]["source"] == "working"
     g.close()

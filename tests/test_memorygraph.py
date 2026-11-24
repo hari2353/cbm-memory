@@ -5,7 +5,7 @@ def test_entity_and_episode_roundtrip():
     g = MemoryGraph()
     g.add_entity("proj:cm", "codebase-memory-mcp", "project", {"lang": "py"})
     g.add_episode("proj:cm", "indexed stair-vs-rag", "2026-10-31T09:00:00Z", "indexer")
-    ctx = g.context_for("proj:cm")
+    ctx = g.recall("proj:cm")
     assert ctx["name"] == "codebase-memory-mcp"
     assert ctx["meta"] == {"lang": "py"}
     assert len(ctx["episodes"]) == 1
@@ -14,7 +14,7 @@ def test_entity_and_episode_roundtrip():
 
 
 def test_context_missing_entity_returns_none():
-    assert MemoryGraph().context_for("nope") is None
+    assert MemoryGraph().recall("nope") is None
 
 
 def test_search_finds_by_name_and_meta():

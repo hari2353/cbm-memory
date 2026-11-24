@@ -8,7 +8,7 @@ Borrowed ideas:
 
 Entities are durable things (person, project, concept); episodes are
 time-stamped observations attached to an entity; observations are consolidated
-facts derived from episodes. `context_for(key)` returns the entity plus its
+facts derived from episodes. `recall(key)` returns the entity plus its
 recent episodes — the read-back an agent needs to stay consistent.
 """
 from __future__ import annotations
@@ -134,10 +134,6 @@ class MemoryGraph:
                     (key, since, since, until, until, limit)).fetchall()
         ent["episodes"] = [dict(r) for r in rows]
         return ent
-
-    def context_for(self, key: str, limit: int = 20) -> dict | None:
-        """Back-compat read-back (no filter)."""
-        return self.recall(key, limit=limit)
 
     def context_window(self, key: str, *, sinks: int = 2, recent: int = 6) -> dict | None:
         """Bounded read-back: first ``sinks`` plus last ``recent`` episodes.
