@@ -2,6 +2,7 @@
 modified / contains / calls / imports, stdlib sqlite. Read APIs back the MCP
 tools; file text powers FTS5 search (T06); PageRank over import/call edges
 boosts hub files (T07); reindex() refreshes incrementally from git (T06)."""
+
 from __future__ import annotations
 
 import datetime as _dt
@@ -53,16 +54,19 @@ DAMPING, ITERS, BOOST, SEM_W = 0.85, 20, 2.0, 3.0
 
 def locked(fn):
     """Serialize DB access: MCP v2 runs tool bodies in worker threads."""
+
     @functools.wraps(fn)
     def wrapper(self, *a, **kw):
         with self._lock:
             return fn(self, *a, **kw)
+
     return wrapper
 
 
 def cached(fn):
     """Memoize read results (agent context tokens: repeated identical calls
     replay the same object). Invalidated on every mutation (load/reindex)."""
+
     @functools.wraps(fn)
     def wrapper(self, *a, **kw):
         key = (fn.__name__, a, tuple(sorted(kw.items())))
@@ -71,6 +75,7 @@ def cached(fn):
         out = fn(self, *a, **kw)
         self._cache[key] = out
         return out
+
     return wrapper
 
 
@@ -160,25 +165,41 @@ class GitNexusGraph:
             key = f"file|{repo}|{t['path']}"
             self.db.execute(
                 "INSERT OR REPLACE INTO nodes VALUES (?,?,?,?,?,?,?)",
-                (repo, "file", t["path"], t["path"], "", json.dumps({"size": t["size"], "lang": t["lang"]}), key))
+                (
+                    repo,
+                    "file",
+                    t["path"],
+                    t["path"],
+                    "",
+                    json.dumps({"size": t["size"], "lang": t["lang"]}),
+                    key,
+                ),
+            )
             for s in t.get("symbols", []):
                 skey = f"symbol|{repo}|{t['path']}|{s['name']}"
                 self.db.execute(
                     "INSERT OR REPLACE INTO nodes VALUES (?,?,?,?,?,?,?)",
-                    (repo, "symbol", s["name"], t["path"], "", s["kind"], skey))
-                self.db.execute("INSERT OR REPLACE INTO edges VALUES (?,?,?,?,?)",
-                                (repo, "contains", key, skey, ""))
+                    (repo, "symbol", s["name"], t["path"], "", s["kind"], skey),
+                )
+                self.db.execute(
+                    "INSERT OR REPLACE INTO edges VALUES (?,?,?,?,?)",
+                    (repo, "contains", key, skey, ""),
+                )
         for path, content in index.get("texts", {}).items():
-            self.db.execute("INSERT INTO filetext (repo, path, content) VALUES (?,?,?)",
-                            (repo, path, content))
+            self.db.execute(
+                "INSERT INTO filetext (repo, path, content) VALUES (?,?,?)",
+                (repo, path, content),
+            )
         for c in index["commits"]:
             self._load_commit(repo, c)
         for c in index.get("calls", []):
             self._store_call(repo, c)
         for imp in index.get("imports", []):
             self._store_import(repo, imp["path"], imp["target"])
-        self.db.execute("INSERT OR REPLACE INTO repo_meta VALUES (?,?,?,?)",
-                        (repo, repo, index.get("head_sha", ""), index.get("indexed_at", "")))
+        self.db.execute(
+            "INSERT OR REPLACE INTO repo_meta VALUES (?,?,?,?)",
+            (repo, repo, index.get("head_sha", ""), index.get("indexed_at", "")),
+        )
         self._recompute_rank(repo)
         self._cache = {}
         self._sem = None
@@ -189,43 +210,70 @@ class GitNexusGraph:
         akey = f"author|{repo}|{c['author_email']}"
         self.db.execute(
             "INSERT OR REPLACE INTO nodes VALUES (?,?,?,?,?,?,?)",
-            (repo, "commit", c["subject"], "", c["occurred_at"],
-             json.dumps({"author_name": c["author_name"], "author_email": c["author_email"]}), ckey))
+            (
+                repo,
+                "commit",
+                c["subject"],
+                "",
+                c["occurred_at"],
+                json.dumps(
+                    {"author_name": c["author_name"], "author_email": c["author_email"]}
+                ),
+                ckey,
+            ),
+        )
         self.db.execute(
             "INSERT OR REPLACE INTO nodes VALUES (?,?,?,?,?,?,?)",
-            (repo, "author", c["author_name"], "", "", "{}", akey))
-        self.db.execute("INSERT OR REPLACE INTO edges VALUES (?,?,?,?,?)",
-                        (repo, "authored", akey, ckey, c["occurred_at"]))
+            (repo, "author", c["author_name"], "", "", "{}", akey),
+        )
+        self.db.execute(
+            "INSERT OR REPLACE INTO edges VALUES (?,?,?,?,?)",
+            (repo, "authored", akey, ckey, c["occurred_at"]),
+        )
         for path in [p for p in c["files_changed"].split("\n") if p]:
-            self.db.execute("INSERT OR REPLACE INTO edges VALUES (?,?,?,?,?)",
-                            (repo, "modified", ckey, f"file|{repo}|{path}", c["occurred_at"]))
+            self.db.execute(
+                "INSERT OR REPLACE INTO edges VALUES (?,?,?,?,?)",
+                (repo, "modified", ckey, f"file|{repo}|{path}", c["occurred_at"]),
+            )
 
     def _store_call(self, repo: str, c: dict) -> None:
         """Name-level edge; a callee name matching several symbols links all of
         them (recall over precision — documented v1 trade-off)."""
         rows = self.db.execute(
             "SELECT key FROM nodes WHERE kind='symbol' AND name=? LIMIT 5",
-            (c["callee"],)).fetchall()
-        src = (f"symbol|{repo}|{c['path']}|{c['caller']}" if c.get("caller")
-               else f"file|{repo}|{c['path']}")
+            (c["callee"],),
+        ).fetchall()
+        src = (
+            f"symbol|{repo}|{c['path']}|{c['caller']}"
+            if c.get("caller")
+            else f"file|{repo}|{c['path']}"
+        )
         for r in rows:
-            self.db.execute("INSERT OR REPLACE INTO edges VALUES (?,?,?,?,?)",
-                            (repo, "calls", src, r["key"], ""))
+            self.db.execute(
+                "INSERT OR REPLACE INTO edges VALUES (?,?,?,?,?)",
+                (repo, "calls", src, r["key"], ""),
+            )
 
     def _store_import(self, repo: str, from_path: str, target: str) -> None:
-        self.db.execute("INSERT OR REPLACE INTO edges VALUES (?,?,?,?,?)",
-                        (repo, "imports",
-                         f"file|{repo}|{from_path}", f"file|{repo}|{target}", ""))
+        self.db.execute(
+            "INSERT OR REPLACE INTO edges VALUES (?,?,?,?,?)",
+            (repo, "imports", f"file|{repo}|{from_path}", f"file|{repo}|{target}", ""),
+        )
 
     # ---------- rank (T07) ----------
     def _recompute_rank(self, repo: str) -> None:
-        files = [r["key"] for r in self.db.execute(
-            "SELECT key FROM nodes WHERE kind='file' AND repo=?", (repo,)).fetchall()]
+        files = [
+            r["key"]
+            for r in self.db.execute(
+                "SELECT key FROM nodes WHERE kind='file' AND repo=?", (repo,)
+            ).fetchall()
+        ]
         fset = set(files)
         out: dict[str, set[str]] = {k: set() for k in files}
         for rel in ("imports", "calls"):
             for r in self.db.execute(
-                    "SELECT src, dst FROM edges WHERE relation=? AND repo=?", (rel, repo)):
+                "SELECT src, dst FROM edges WHERE relation=? AND repo=?", (rel, repo)
+            ):
                 s, d = _file_key(r["src"]), _file_key(r["dst"])
                 if s and d and s != d and s in fset and d in fset:
                     out[s].add(d)
@@ -256,10 +304,15 @@ class GitNexusGraph:
     @locked
     def counts(self) -> list[tuple[str, int]]:
         pairs = []
-        for res, label in ((self.db.execute(
-                "SELECT kind, COUNT(*) FROM nodes GROUP BY kind"), "node"),
-                (self.db.execute(
-                    "SELECT relation, COUNT(*) FROM edges GROUP BY relation"), "edge")):
+        for res, label in (
+            (self.db.execute("SELECT kind, COUNT(*) FROM nodes GROUP BY kind"), "node"),
+            (
+                self.db.execute(
+                    "SELECT relation, COUNT(*) FROM edges GROUP BY relation"
+                ),
+                "edge",
+            ),
+        ):
             for k, n in res.fetchall():
                 pairs.append((k, n))
         return sorted(pairs)
@@ -270,7 +323,8 @@ class GitNexusGraph:
         if repo in ("*", ""):
             return None
         row = self.db.execute(
-            "SELECT repo FROM repo_meta WHERE repo=? OR path=?", (repo, repo)).fetchone()
+            "SELECT repo FROM repo_meta WHERE repo=? OR path=?", (repo, repo)
+        ).fetchone()
         return row["repo"] if row else None
 
     @locked
@@ -278,7 +332,8 @@ class GitNexusGraph:
     def explain_file(self, repo: str, path: str) -> dict:
         rows = self.db.execute(
             "SELECT key, repo, name FROM nodes WHERE kind='file' AND name=? ORDER BY repo",
-            (path,)).fetchall()
+            (path,),
+        ).fetchall()
         repo_key = self._repo_for(repo)
         chosen = next((r for r in rows if r["repo"] == repo_key), None)
         if chosen is None and rows:  # deterministic pick: highest pagerank wins
@@ -288,15 +343,21 @@ class GitNexusGraph:
             return {"path": path, "symbols": [], "commits": []}
         symrows = self.db.execute(
             "SELECT name, meta AS kind FROM nodes WHERE kind='symbol' AND repo=? AND path=?",
-            (chosen["repo"], path)).fetchall()
-        commits = [dict(r) for r in self.db.execute(
-            """SELECT n.name AS subject, n.meta, e.occurred_at
+            (chosen["repo"], path),
+        ).fetchall()
+        commits = [
+            dict(r)
+            for r in self.db.execute(
+                """SELECT n.name AS subject, n.meta, e.occurred_at
                FROM edges e JOIN nodes n ON n.key = e.src
                WHERE e.relation='modified' AND e.dst = ? ORDER BY e.occurred_at DESC LIMIT 20""",
-            (chosen["key"],))]  # cap 20: hot files have hundreds of commits (token budget)
+                (chosen["key"],),
+            )
+        ]  # cap 20: hot files have hundreds of commits (token budget)
         total_commits = self.db.execute(
             "SELECT COUNT(*) FROM edges WHERE relation='modified' AND dst=?",
-            (chosen["key"],)).fetchone()[0]
+            (chosen["key"],),
+        ).fetchone()[0]
         commits = [{**c, **json.loads(c.pop("meta"))} for c in commits]
         related: list[dict] = []
         if len(rows) > 0:
@@ -308,40 +369,66 @@ class GitNexusGraph:
             names = [s["name"] for s in symrows]
             if names:
                 qmarks = ",".join("?" * len(names))
-                defn: dict[str, int] = {r["name"]: r["c"] for r in self.db.execute(
-                    f"SELECT name, COUNT(DISTINCT key) AS c FROM nodes "
-                    f"WHERE kind='symbol' AND name IN ({qmarks}) GROUP BY name", names)}
-                cand = [r for r in self.db.execute(
-                    f"""SELECT DISTINCT n.repo, n.name, n.path FROM nodes n
+                defn: dict[str, int] = {
+                    r["name"]: r["c"]
+                    for r in self.db.execute(
+                        f"SELECT name, COUNT(DISTINCT key) AS c FROM nodes "
+                        f"WHERE kind='symbol' AND name IN ({qmarks}) GROUP BY name",
+                        names,
+                    )
+                }
+                cand = [
+                    r
+                    for r in self.db.execute(
+                        f"""SELECT DISTINCT n.repo, n.name, n.path FROM nodes n
                         WHERE n.kind='symbol' AND n.repo<>?
                           AND n.name IN ({qmarks})
                           AND n.meta NOT IN ('heading', 'md-heading')""",
-                    [chosen["repo"]] + names)]
-                counts = {r["repo"]: r["c"] for r in self.db.execute(
-                    "SELECT repo, COUNT(*) AS c FROM nodes WHERE kind='file' GROUP BY repo")}
+                        [chosen["repo"]] + names,
+                    )
+                ]
+                counts = {
+                    r["repo"]: r["c"]
+                    for r in self.db.execute(
+                        "SELECT repo, COUNT(*) AS c FROM nodes WHERE kind='file' GROUP BY repo"
+                    )
+                }
                 for r in cand:
                     # per-repo PageRank sums to 1: scale by repo size so hub
                     # files of big repos compare fairly against tiny repos
                     pr = self._rank.get(r["repo"], {}).get(
-                        f"file|{r['repo']}|{r['path']}", 0.0) * counts.get(r["repo"], 1)
+                        f"file|{r['repo']}|{r['path']}", 0.0
+                    ) * counts.get(r["repo"], 1)
                     name = r["name"]
                     mul = 1.0
-                    if len(name) >= 8 and ("_" in name or any(c.isupper() for c in name)):
+                    if len(name) >= 8 and (
+                        "_" in name or any(c.isupper() for c in name)
+                    ):
                         mul *= 10.0  # long/snake/camel identifiers carry intent
                     if name.startswith("_"):
                         mul *= 0.1
                     if defn.get(name, 0) > 5:
-                        mul *= 0.1   # defined in many places = generic, weak signal
-                    related.append({"repo": r["repo"], "name": name, "path": r["path"],
-                                    "rank": round(pr * mul, 6)})
+                        mul *= 0.1  # defined in many places = generic, weak signal
+                    related.append(
+                        {
+                            "repo": r["repo"],
+                            "name": name,
+                            "path": r["path"],
+                            "rank": round(pr * mul, 6),
+                        }
+                    )
                 related.sort(key=lambda x: (-x["rank"], x["repo"], x["path"]))
                 related = related[:10]
-        return {"path": path, "repo": chosen["repo"],
-                "repos": [r["repo"] for r in rows],
-                "symbols": [dict(r) for r in symrows], "commits": commits,
-                "total_commits": total_commits,
-                "truncated": total_commits > len(commits),
-                "related": related}
+        return {
+            "path": path,
+            "repo": chosen["repo"],
+            "repos": [r["repo"] for r in rows],
+            "symbols": [dict(r) for r in symrows],
+            "commits": commits,
+            "total_commits": total_commits,
+            "truncated": total_commits > len(commits),
+            "related": related,
+        }
 
     @locked
     @cached
@@ -352,7 +439,8 @@ class GitNexusGraph:
             "SELECT n.name AS author_name, COUNT(*) AS commits, "
             "COUNT(DISTINCT n.repo) AS repos FROM edges e "
             "JOIN nodes n ON n.key = e.src WHERE e.relation='authored' GROUP BY n.name "
-            "ORDER BY commits DESC LIMIT 50")  # top contributors, bounded (token budget)
+            "ORDER BY commits DESC LIMIT 50"
+        )  # top contributors, bounded (token budget)
         return [dict(r) for r in rows]
 
     @locked
@@ -361,8 +449,11 @@ class GitNexusGraph:
         (symbol load x PageRank), layer map, verdict. All sections capped for
         tokens; see tests/test_pro.py for the shape."""
         repo_key = self._repo_for(repo)
-        repos = [repo_key] if repo_key else [
-            r["repo"] for r in self.db.execute("SELECT repo FROM repo_meta")]
+        repos = (
+            [repo_key]
+            if repo_key
+            else [r["repo"] for r in self.db.execute("SELECT repo FROM repo_meta")]
+        )
         cycles: list[dict] = []
         god: list[tuple[float, str, int, float]] = []
         layers: dict[str, dict] = {}
@@ -370,28 +461,34 @@ class GitNexusGraph:
         for rp in repos:
             adj: dict[str, list[str]] = {}
             for r in self.db.execute(
-                    "SELECT src, dst FROM edges WHERE relation='imports' AND repo=?", (rp,)):
+                "SELECT src, dst FROM edges WHERE relation='imports' AND repo=?", (rp,)
+            ):
                 s, d = _file_key(r["src"]), _file_key(r["dst"])
                 if s and d and s != d:
                     adj.setdefault(s, []).append(d)
             nfiles += self.db.execute(
-                "SELECT COUNT(*) FROM nodes WHERE kind='file' AND repo=?", (rp,)).fetchone()[0]
+                "SELECT COUNT(*) FROM nodes WHERE kind='file' AND repo=?", (rp,)
+            ).fetchone()[0]
             for comp in _sccs(adj):
                 if len(comp) > 1:
                     names = sorted(k.rsplit("|", 1)[-1] for k in comp)[:12]
                     cycles.append({"path": " -> ".join(names), "files": len(comp)})
             ranks = self._rank.get(rp, {})
             for r in self.db.execute(
-                    "SELECT path, COUNT(*) AS n FROM nodes WHERE kind='symbol' AND repo=? "
-                    "GROUP BY path", (rp,)):
+                "SELECT path, COUNT(*) AS n FROM nodes WHERE kind='symbol' AND repo=? "
+                "GROUP BY path",
+                (rp,),
+            ):
                 rank = ranks.get(f"file|{rp}|{r['path']}", 0.0)
                 god.append((r["n"] * rank, r["path"], r["n"], rank))
             for r in self.db.execute(
-                    "SELECT path FROM nodes WHERE kind='file' AND repo=?", (rp,)):
+                "SELECT path FROM nodes WHERE kind='file' AND repo=?", (rp,)
+            ):
                 d = r["path"].split("/")[0] if "/" in r["path"] else "."
                 layers.setdefault(d, {"dir": d, "files": 0, "imports": 0})["files"] += 1
             for r in self.db.execute(
-                    "SELECT src FROM edges WHERE relation='imports' AND repo=?", (rp,)):
+                "SELECT src FROM edges WHERE relation='imports' AND repo=?", (rp,)
+            ):
                 s = _file_key(r["src"])
                 if s:
                     p = s.rsplit("|", 1)[-1]
@@ -404,9 +501,13 @@ class GitNexusGraph:
             "files": nfiles,
             "cycles": sorted(cycles, key=lambda c: (-c["files"], c["path"]))[:5],
             "truncated": len(cycles) > 5,
-            "god_files": [{"path": p, "symbols": n, "rank": round(rank, 4)}
-                          for _, p, n, rank in god[:5]],
-            "layers": sorted(layers.values(), key=lambda d: (-d["files"], d["dir"]))[:12],
+            "god_files": [
+                {"path": p, "symbols": n, "rank": round(rank, 4)}
+                for _, p, n, rank in god[:5]
+            ],
+            "layers": sorted(layers.values(), key=lambda d: (-d["files"], d["dir"]))[
+                :12
+            ],
             "verdict": "tangled" if cycles else "ok",
         }
 
@@ -415,8 +516,10 @@ class GitNexusGraph:
         if self._sem is None:
             from collections import Counter
 
-            texts = {f"file|{r['repo']}|{r['path']}": r["content"] or "" for r in self.db.execute(
-                "SELECT repo, path, content FROM filetext")}
+            texts = {
+                f"file|{r['repo']}|{r['path']}": r["content"] or ""
+                for r in self.db.execute("SELECT repo, path, content FROM filetext")
+            }
             df: Counter = Counter()
             for t in texts.values():
                 df.update(set(_tokwords(t)))
@@ -431,7 +534,8 @@ class GitNexusGraph:
         words = query.lower().split()
         tokens: dict[tuple, set[str]] = {}
         for r in self.db.execute(
-                "SELECT repo, name, path, meta AS kind FROM nodes WHERE kind='symbol'"):
+            "SELECT repo, name, path, meta AS kind FROM nodes WHERE kind='symbol'"
+        ):
             tokens.setdefault((r["repo"], r["path"]), set()).add(r["name"].lower())
 
         def hits(word: str, tok: str) -> float:
@@ -452,32 +556,63 @@ class GitNexusGraph:
             pr = rank.get(f"file|{r['repo']}|{r['name']}", 0.0)
             boost = 1.0 + BOOST * (pr / maxpr if maxpr else 0.0)
             sim = _cos(qv, vecs.get(f"file|{r['repo']}|{r['name']}", {}))
-            mt = sorted({w for w in words for t in toks if hits(w, t)})[:2]  # why it matched
+            mt = sorted({w for w in words for t in toks if hits(w, t)})[
+                :2
+            ]  # why it matched
             scored.append((lexical * boost + SEM_W * sim, lexical, sim, mt, r))
         # specific repo: scope top_files to it; other repos' hits become `related`
         # (cross-pollination: one repo's context answers another repo's question)
         mine = [x for x in scored if repo_key is None or x[4]["repo"] == repo_key]
-        others = [x for x in scored
-                  if repo_key and x[4]["repo"] != repo_key and (x[1] > 0 or x[2] >= 0.15)]
-        top = [{"path": r["name"], "repo": r["repo"],
+        others = [
+            x
+            for x in scored
+            if repo_key and x[4]["repo"] != repo_key and (x[1] > 0 or x[2] >= 0.15)
+        ]
+        top = [
+            {
+                "path": r["name"],
+                "repo": r["repo"],
                 "rank": round(s, 4),
                 **({"match": "semantic"} if lex == 0 else {}),
-                **({"via": mt} if mt else {})}
-               for s, lex, sim, mt, r in sorted(mine, key=lambda x: -x[0])[:top_k] if s > 0]
+                **({"via": mt} if mt else {}),
+            }
+            for s, lex, sim, mt, r in sorted(mine, key=lambda x: -x[0])[:top_k]
+            if s > 0
+        ]
         # compound output: ship each hit file's top symbol names inline (Aider
         # ships signatures in its map) - saves an explain_file round-trip
         for t in top:
-            t["symbols"] = [r[0] for r in self.db.execute(
-                "SELECT name FROM nodes WHERE kind='symbol' AND repo=? AND path=? "
-                "AND meta NOT IN ('heading','md-heading') LIMIT 5",
-                (t["repo"], t["path"]))]
-        related = [{"path": r["name"], "repo": r["repo"], "rank": round(s, 4),
-                    **({"via": mt} if mt else {})}
-                    for s, lex, sim, mt, r in sorted(others, key=lambda x: -x[0])[:3]]
-        recent = [dict(r) for r in self.db.execute(
-            "SELECT n.name AS subject, e.occurred_at FROM edges e JOIN nodes n ON n.key = e.dst "
-            "WHERE e.relation='authored' ORDER BY e.occurred_at DESC LIMIT ?", (top_k,))]
-        return {"repo": repo, "top_files": top, "related": related, "recent_commits": recent}
+            t["symbols"] = [
+                r[0]
+                for r in self.db.execute(
+                    "SELECT name FROM nodes WHERE kind='symbol' AND repo=? AND path=? "
+                    "AND meta NOT IN ('heading','md-heading') LIMIT 5",
+                    (t["repo"], t["path"]),
+                )
+            ]
+        related = [
+            {
+                "path": r["name"],
+                "repo": r["repo"],
+                "rank": round(s, 4),
+                **({"via": mt} if mt else {}),
+            }
+            for s, lex, sim, mt, r in sorted(others, key=lambda x: -x[0])[:3]
+        ]
+        recent = [
+            dict(r)
+            for r in self.db.execute(
+                "SELECT n.name AS subject, e.occurred_at FROM edges e JOIN nodes n ON n.key = e.dst "
+                "WHERE e.relation='authored' ORDER BY e.occurred_at DESC LIMIT ?",
+                (top_k,),
+            )
+        ]
+        return {
+            "repo": repo,
+            "top_files": top,
+            "related": related,
+            "recent_commits": recent,
+        }
 
     def _grouped(self, rows: list[dict], field: str) -> list[dict]:
         """Collapse flat rows into per-(repo,path) groups: repo paths repeat on
@@ -491,57 +626,86 @@ class GitNexusGraph:
                 g = {"repo": r["repo"], "path": r["path"], field: []}
                 seen[k] = g
                 out.append(g)
-            g[field].append(r["caller"] if field == "callers" else
-                            {"name": r["name"], "kind": r.get("kind")})
+            g[field].append(
+                r["caller"]
+                if field == "callers"
+                else {"name": r["name"], "kind": r.get("kind")}
+            )
         return out
 
     @locked
     @cached
     def search_codebase_memory(self, repo: str, text: str) -> list[dict]:
-        rows = [dict(r) for r in self.db.execute(
-            "SELECT DISTINCT name, path, repo, meta AS kind FROM nodes "
-            "WHERE kind='symbol' AND name LIKE ? "
-            "ORDER BY (meta='heading') ASC, name LIMIT 20", (f"%{text}%",))]
+        rows = [
+            dict(r)
+            for r in self.db.execute(
+                "SELECT DISTINCT name, path, repo, meta AS kind FROM nodes "
+                "WHERE kind='symbol' AND name LIKE ? "
+                "ORDER BY (meta='heading') ASC, name LIMIT 20",
+                (f"%{text}%",),
+            )
+        ]
         if not rows:
             # T06: full-text over file bodies, then offline semantic similarity
             # (hashed n-gram TF-IDF) when neither symbol names nor FTS matched.
             words = [w for w in re.findall(r"\w+", text) if w]
             if words:
                 try:
-                    fpaths = [(r["repo"], r["path"]) for r in self.db.execute(
-                        "SELECT f.repo, f.path FROM filetext_fts "
-                        "JOIN filetext f ON f.id = filetext_fts.rowid "
-                        "WHERE filetext_fts MATCH ? ORDER BY rank LIMIT 5",
-                        (" OR ".join(w + "*" for w in words),)).fetchall()]
+                    fpaths = [
+                        (r["repo"], r["path"])
+                        for r in self.db.execute(
+                            "SELECT f.repo, f.path FROM filetext_fts "
+                            "JOIN filetext f ON f.id = filetext_fts.rowid "
+                            "WHERE filetext_fts MATCH ? ORDER BY rank LIMIT 5",
+                            (" OR ".join(w + "*" for w in words),),
+                        ).fetchall()
+                    ]
                 except sqlite3.OperationalError:
                     fpaths = []
                 for rp, p in fpaths:
-                    rows += [dict(r) for r in self.db.execute(
-                        "SELECT DISTINCT name, path, repo, meta AS kind FROM nodes "
-                        "WHERE kind='symbol' AND repo=? AND path=?", (rp, p))]
+                    rows += [
+                        dict(r)
+                        for r in self.db.execute(
+                            "SELECT DISTINCT name, path, repo, meta AS kind FROM nodes "
+                            "WHERE kind='symbol' AND repo=? AND path=?",
+                            (rp, p),
+                        )
+                    ]
             if not rows and text.strip():
                 vecs, idf = self._sem_state()
                 qv = _embed(text, idf)
-                top = sorted((( _cos(qv, v), k) for k, v in vecs.items() if v),
-                             key=lambda x: (-x[0], x[1]))[:5]
+                top = sorted(
+                    ((_cos(qv, v), k) for k, v in vecs.items() if v),
+                    key=lambda x: (-x[0], x[1]),
+                )[:5]
                 for sim, k in top:
                     if sim < 0.05:
                         break
                     _, rp, p = k.split("|", 2)
-                    rows += [dict(r) for r in self.db.execute(
-                        "SELECT DISTINCT name, path, repo, meta AS kind FROM nodes "
-                        "WHERE kind='symbol' AND repo=? AND path=?", (rp, p))]
+                    rows += [
+                        dict(r)
+                        for r in self.db.execute(
+                            "SELECT DISTINCT name, path, repo, meta AS kind FROM nodes "
+                            "WHERE kind='symbol' AND repo=? AND path=?",
+                            (rp, p),
+                        )
+                    ]
         return self._grouped(rows[:20], "symbols")[:20]
 
     @locked
     @cached
     def find_callers(self, repo: str, symbol: str) -> list[dict]:
-        keys = [r["key"] for r in self.db.execute(
-            "SELECT key FROM nodes WHERE kind='symbol' AND name=?", (symbol,)).fetchall()]
+        keys = [
+            r["key"]
+            for r in self.db.execute(
+                "SELECT key FROM nodes WHERE kind='symbol' AND name=?", (symbol,)
+            ).fetchall()
+        ]
         seen, out = set(), []
         for k in keys:
             for r in self.db.execute(
-                    "SELECT src FROM edges WHERE relation='calls' AND dst=?", (k,)):
+                "SELECT src FROM edges WHERE relation='calls' AND dst=?", (k,)
+            ):
                 parts = r["src"].split("|")
                 if parts[0] == "symbol" and len(parts) >= 4:
                     item = {"caller": parts[3], "path": parts[2], "repo": parts[1]}
@@ -557,7 +721,8 @@ class GitNexusGraph:
         # grouped per file so repo+path aren't repeated on every caller row
         return self._grouped(
             sorted(out, key=lambda x: (x["repo"], x["path"], x["caller"]))[:50],
-            "callers")
+            "callers",
+        )
 
     @locked
     @cached
@@ -566,19 +731,34 @@ class GitNexusGraph:
         # resolve the file node by path, preferring the requested repo.
         rows = self.db.execute(
             "SELECT key, repo FROM nodes WHERE kind='file' AND name=? ORDER BY repo",
-            (path,)).fetchall()
+            (path,),
+        ).fetchall()
         repo_key = self._repo_for(repo)
-        frow = next((r for r in rows if r["repo"] == repo_key),
-                    max(rows, key=lambda r: (self._rank.get(repo_key or "", {}).get(r["key"], 0.0), r["repo"]))
-                    if rows else None)
+        frow = next(
+            (r for r in rows if r["repo"] == repo_key),
+            max(
+                rows,
+                key=lambda r: (
+                    self._rank.get(repo_key or "", {}).get(r["key"], 0.0),
+                    r["repo"],
+                ),
+            )
+            if rows
+            else None,
+        )
         if not frow:
             return {"repo": repo, "root": path, "symbols": [], "impacted": []}
         fkey, real_repo = frow["key"], frow["repo"]
-        syms = [dict(r) for r in self.db.execute(
-            "SELECT name, meta AS kind FROM nodes WHERE kind='symbol' AND repo=? AND path=?",
-            (real_repo, path))]
+        syms = [
+            dict(r)
+            for r in self.db.execute(
+                "SELECT name, meta AS kind FROM nodes WHERE kind='symbol' AND repo=? AND path=?",
+                (real_repo, path),
+            )
+        ]
         frontier = [(fkey, 0)] + [
-            (f"symbol|{real_repo}|{path}|{s['name']}", 0) for s in syms]
+            (f"symbol|{real_repo}|{path}|{s['name']}", 0) for s in syms
+        ]
         seen = {k for k, _ in frontier}
         impacted: dict[str, int] = {}
         truncated = False
@@ -589,8 +769,9 @@ class GitNexusGraph:
             if depth >= 3:
                 continue
             for r in self.db.execute(
-                    "SELECT src FROM edges WHERE relation IN ('calls','imports') AND dst=?",
-                    (key,)):
+                "SELECT src FROM edges WHERE relation IN ('calls','imports') AND dst=?",
+                (key,),
+            ):
                 src = r["src"]
                 if src in seen:
                     continue
@@ -606,9 +787,13 @@ class GitNexusGraph:
                 frontier.append((fpath_key, depth + 1))
         ordered = sorted(impacted.items(), key=lambda x: x[1])[:50]  # token budget
         truncated = len(impacted) > len(ordered)
-        return {"repo": repo, "root": path, "symbols": syms,
-                "impacted": [{"path": p, "depth": d} for p, d in ordered],
-                "truncated": truncated}
+        return {
+            "repo": repo,
+            "root": path,
+            "symbols": syms,
+            "impacted": [{"path": p, "depth": d} for p, d in ordered],
+            "truncated": truncated,
+        }
 
     @locked
     def detect_changes(self, repo: str, changed_files: list[str]) -> dict:
@@ -617,36 +802,55 @@ class GitNexusGraph:
         for path in changed_files:
             rows = self.db.execute(
                 "SELECT key, repo FROM nodes WHERE kind='file' AND name=? ORDER BY repo",
-                (path,)).fetchall()
+                (path,),
+            ).fetchall()
             repo_key = self._repo_for(repo)
-            frow = next((r for r in rows if r["repo"] == repo_key), rows[0] if rows else None)
+            frow = next(
+                (r for r in rows if r["repo"] == repo_key), rows[0] if rows else None
+            )
             if not frow:
                 out_files.append({"path": path, "symbols": [], "recent_commits": []})
                 continue
-            syms = [dict(r) for r in self.db.execute(
-                "SELECT name, meta AS kind FROM nodes WHERE kind='symbol' AND repo=? AND path=?",
-                (frow["repo"], path))]
-            commits = [dict(r) for r in self.db.execute(
-                "SELECT n.name AS subject, e.occurred_at FROM edges e "
-                "JOIN nodes n ON n.key=e.src WHERE e.relation='modified' AND e.dst=? "
-                "ORDER BY e.occurred_at DESC LIMIT 5", (frow["key"],))]
+            syms = [
+                dict(r)
+                for r in self.db.execute(
+                    "SELECT name, meta AS kind FROM nodes WHERE kind='symbol' AND repo=? AND path=?",
+                    (frow["repo"], path),
+                )
+            ]
+            commits = [
+                dict(r)
+                for r in self.db.execute(
+                    "SELECT n.name AS subject, e.occurred_at FROM edges e "
+                    "JOIN nodes n ON n.key=e.src WHERE e.relation='modified' AND e.dst=? "
+                    "ORDER BY e.occurred_at DESC LIMIT 5",
+                    (frow["key"],),
+                )
+            ]
             out_files.append({"path": path, "symbols": syms, "recent_commits": commits})
-        return {"repo": repo, "changed": out_files,
-                "total_symbols": sum(len(f["symbols"]) for f in out_files)}
+        return {
+            "repo": repo,
+            "changed": out_files,
+            "total_symbols": sum(len(f["symbols"]) for f in out_files),
+        }
 
     # ---------- incremental refresh (T06) ----------
     def _forget(self, repo: str, path: str) -> None:
         fk = f"file|{repo}|{path}"
         sym_like = f"symbol|{repo}|{path}|%"
         self.db.execute("DELETE FROM nodes WHERE key=?", (fk,))
-        self.db.execute("DELETE FROM nodes WHERE kind='symbol' AND repo=? AND path=?",
-                        (repo, path))  # scoped: another repo may own the same path
+        self.db.execute(
+            "DELETE FROM nodes WHERE kind='symbol' AND repo=? AND path=?", (repo, path)
+        )  # scoped: another repo may own the same path
         self.db.execute("DELETE FROM filetext WHERE repo=? AND path=?", (repo, path))
         self.db.execute("DELETE FROM edges WHERE relation='contains' AND src=?", (fk,))
-        self.db.execute("DELETE FROM edges WHERE relation='imports' AND (src=? OR dst=?)", (fk, fk))
+        self.db.execute(
+            "DELETE FROM edges WHERE relation='imports' AND (src=? OR dst=?)", (fk, fk)
+        )
         self.db.execute(
             "DELETE FROM edges WHERE relation='calls' AND (src=? OR src LIKE ? OR dst LIKE ?)",
-            (fk, sym_like, sym_like))
+            (fk, sym_like, sym_like),
+        )
         # 'modified' history is kept: deleted files stay remembered.
 
     @locked
@@ -654,10 +858,13 @@ class GitNexusGraph:
         if repo in ("*", ""):
             rows = self.db.execute("SELECT path, sha FROM repo_meta").fetchall()
         else:  # match repo key exactly, or the client's startup string (path)
-            rows = self.db.execute(
-                "SELECT path, sha FROM repo_meta WHERE repo=? OR path=?",
-                (repo, repo)).fetchall() or self.db.execute(
-                "SELECT path, sha FROM repo_meta LIMIT 1").fetchall()
+            rows = (
+                self.db.execute(
+                    "SELECT path, sha FROM repo_meta WHERE repo=? OR path=?",
+                    (repo, repo),
+                ).fetchall()
+                or self.db.execute("SELECT path, sha FROM repo_meta LIMIT 1").fetchall()
+            )
         total = 0
         changed_files: list[str] = []
         last_sha = None
@@ -666,11 +873,16 @@ class GitNexusGraph:
             total += applied
             changed_files += chg_files
             last_sha = self.db.execute(
-                "SELECT sha FROM repo_meta WHERE path=?", (row["path"],)).fetchone()["sha"]
+                "SELECT sha FROM repo_meta WHERE path=?", (row["path"],)
+            ).fetchone()["sha"]
         # honest truncation: say what changed and cap the list (token budget)
-        return {"repo": repo, "changed": total, "indexed_commit": last_sha,
-                "changed_files": changed_files[:20],
-                "truncated": len(changed_files) > 20}
+        return {
+            "repo": repo,
+            "changed": total,
+            "indexed_commit": last_sha,
+            "changed_files": changed_files[:20],
+            "truncated": len(changed_files) > 20,
+        }
 
     def _reindex_one(self, repo_path_str: str, old_sha: str) -> tuple[int, list[str]]:
         from .repoindex import IGNORE_PARTS, index_one, list_files
@@ -681,8 +893,9 @@ class GitNexusGraph:
         self._sem = None
 
         def git(*a: str) -> str:
-            return subprocess.run(["git", *a], cwd=repo_path, check=True,
-                                  capture_output=True, text=True).stdout
+            return subprocess.run(
+                ["git", *a], cwd=repo_path, check=True, capture_output=True, text=True
+            ).stdout
 
         new_sha = git("rev-parse", "HEAD").strip()
         changed: dict[str, str] = {}
@@ -712,11 +925,21 @@ class GitNexusGraph:
         if old_sha != new_sha and applied:
             info = git("log", "-1", r"--pretty=%an%x1f%ae%x1f%aI%x1f%s").strip()
             an, ae, at, subject = (info.split("\x1f") + [""])[:4]
-            self._load_commit(repo_key, {"sha": new_sha, "author_name": an, "author_email": ae,
-                                         "occurred_at": at, "subject": subject,
-                                         "files_changed": "\n".join(changed)})
-        self.db.execute("UPDATE repo_meta SET sha=?, indexed_at=? WHERE path=?",
-                        (new_sha, _dt.datetime.now(_dt.timezone.utc).isoformat(), repo_key))
+            self._load_commit(
+                repo_key,
+                {
+                    "sha": new_sha,
+                    "author_name": an,
+                    "author_email": ae,
+                    "occurred_at": at,
+                    "subject": subject,
+                    "files_changed": "\n".join(changed),
+                },
+            )
+        self.db.execute(
+            "UPDATE repo_meta SET sha=?, indexed_at=? WHERE path=?",
+            (new_sha, _dt.datetime.now(_dt.timezone.utc).isoformat(), repo_key),
+        )
         self._recompute_rank(repo_key)
         self.db.commit()
         return applied, sorted(changed)
@@ -729,20 +952,35 @@ class GitNexusGraph:
         fk = f"file|{repo}|{path}"
         self.db.execute(
             "INSERT OR REPLACE INTO nodes VALUES (?,?,?,?,?,?,?)",
-            (repo, "file", path, path, "",
-             json.dumps({"size": entry["size"], "lang": entry["lang"]}), fk))
+            (
+                repo,
+                "file",
+                path,
+                path,
+                "",
+                json.dumps({"size": entry["size"], "lang": entry["lang"]}),
+                fk,
+            ),
+        )
         for s in entry["symbols"]:
             sk = f"symbol|{repo}|{path}|{s['name']}"
             self.db.execute(
                 "INSERT OR REPLACE INTO nodes VALUES (?,?,?,?,?,?,?)",
-                (repo, "symbol", s["name"], path, "", s["kind"], sk))
-            self.db.execute("INSERT OR REPLACE INTO edges VALUES (?,?,?,?,?)",
-                            (repo, "contains", fk, sk, ""))
+                (repo, "symbol", s["name"], path, "", s["kind"], sk),
+            )
+            self.db.execute(
+                "INSERT OR REPLACE INTO edges VALUES (?,?,?,?,?)",
+                (repo, "contains", fk, sk, ""),
+            )
         if entry.get("text") is not None:
-            self.db.execute("INSERT INTO filetext (repo, path, content) VALUES (?,?,?)",
-                            (repo, path, entry["text"]))
+            self.db.execute(
+                "INSERT INTO filetext (repo, path, content) VALUES (?,?,?)",
+                (repo, path, entry["text"]),
+            )
         for c in entry["calls"]:
-            self._store_call(repo, {"path": path, "caller": c["caller"], "callee": c["callee"]})
+            self._store_call(
+                repo, {"path": path, "caller": c["caller"], "callee": c["callee"]}
+            )
         for m in entry["imports"]:
             target = _resolve_import(m, path, files_set)
             if target:

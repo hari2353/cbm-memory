@@ -7,7 +7,9 @@ NOW = "2026-11-21T12:00:00Z"
 
 def test_working_set_get_roundtrip():
     g = MemoryGraph()
-    g.remember_working("task", "indexing repo", ttl_seconds=600, importance=0.9, now=NOW)
+    g.remember_working(
+        "task", "indexing repo", ttl_seconds=600, importance=0.9, now=NOW
+    )
     row = g.recall_working("task", now=NOW)
     assert row["key"] == "task"
     assert row["value"] == "indexing repo"
@@ -51,14 +53,21 @@ def test_evict_expired_returns_count():
 def test_working_items_order_by_importance_then_updated_at():
     g = MemoryGraph()
     g.remember_working("low", "v", importance=0.2, now=NOW)
-    g.remember_working("high-old", "v", ttl_seconds=7200, importance=0.9,
-                       now="2026-11-21T11:00:00Z")
+    g.remember_working(
+        "high-old", "v", ttl_seconds=7200, importance=0.9, now="2026-11-21T11:00:00Z"
+    )
     g.remember_working("high-new", "v", importance=0.9, now=NOW)
     g.remember_working("mid", "v", importance=0.5, now=NOW)
     assert [r["key"] for r in g.working_items(now=NOW)] == [
-        "high-new", "high-old", "mid", "low"]
+        "high-new",
+        "high-old",
+        "mid",
+        "low",
+    ]
     assert [r["key"] for r in g.working_items(now=NOW, limit=2)] == [
-        "high-new", "high-old"]
+        "high-new",
+        "high-old",
+    ]
     g.close()
 
 
@@ -66,8 +75,7 @@ def test_working_items_hides_expired():
     g = MemoryGraph()
     g.remember_working("gone", "v", ttl_seconds=60, now=NOW)
     g.remember_working("fresh", "v", ttl_seconds=600, now=NOW)
-    assert [r["key"] for r in g.working_items(now="2026-11-21T12:05:00Z")] == [
-        "fresh"]
+    assert [r["key"] for r in g.working_items(now="2026-11-21T12:05:00Z")] == ["fresh"]
     g.close()
 
 

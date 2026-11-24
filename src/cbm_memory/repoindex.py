@@ -3,6 +3,7 @@ regex fallback), call sites, imports, and file text for full-text search.
 
 Deliberately cheap: one pass, stdlib + tree-sitter grammars, SQLite upstream.
 """
+
 from __future__ import annotations
 
 import datetime as _dt
@@ -24,16 +25,32 @@ for suffix, pattern, kind in (
 
 LANGS = {".py", ".ts", ".js", ".md", ".toml"}
 # never index vendored/build/cache junk, tracked or not (T09)
-IGNORE_PARTS = {"build", "dist", "node_modules", ".venv", "venv", "__pycache__",
-                ".git", ".cbm", ".mypy_cache", ".pytest_cache", ".ruff_cache",
-                ".eggs", ".tox", "site-packages", ".obsidian"}
+IGNORE_PARTS = {
+    "build",
+    "dist",
+    "node_modules",
+    ".venv",
+    "venv",
+    "__pycache__",
+    ".git",
+    ".cbm",
+    ".mypy_cache",
+    ".pytest_cache",
+    ".ruff_cache",
+    ".eggs",
+    ".tox",
+    "site-packages",
+    ".obsidian",
+}
 MAX_TEXT_BYTES = 256_000  # skip full-text (FTS) for huge files
 
 ALL_LANG_EXTS = set(LANGS) | set(symbols_ts.LANG_BY_EXT)
 
 
 def _git(repo: pathlib.Path, *args: str) -> str:
-    out = subprocess.run(["git", *args], cwd=repo, check=True, capture_output=True, text=True)
+    out = subprocess.run(
+        ["git", *args], cwd=repo, check=True, capture_output=True, text=True
+    )
     return out.stdout
 
 
@@ -49,17 +66,26 @@ def _unquote(p: str) -> str:
     """git quotes exotic paths (C-style, inside double quotes); decode them."""
     if len(p) > 1 and p.startswith('"') and p.endswith('"'):
         body = p[1:-1]
-        return re.sub(r"\\(?:([0-7]{3})|(.))",
-                      lambda m: chr(int(m.group(1), 8)) if m.group(1) else
-                      {"n": "\n", "t": "\t", "\\": "\\", '"': '"'}.get(m.group(2), m.group(2)),
-                      body)
+        return re.sub(
+            r"\\(?:([0-7]{3})|(.))",
+            lambda m: (
+                chr(int(m.group(1), 8))
+                if m.group(1)
+                else {"n": "\n", "t": "\t", "\\": "\\", '"': '"'}.get(
+                    m.group(2), m.group(2)
+                )
+            ),
+            body,
+        )
     return p
 
 
 def list_files(repo: pathlib.Path) -> list[str]:
     # core.quotePath=false keeps non-ASCII names raw; _unquote still handles
     # paths containing quotes/backslashes/control chars
-    ls = _git(repo, "-c", "core.quotePath=false", "ls-files", "-co", "--exclude-standard")
+    ls = _git(
+        repo, "-c", "core.quotePath=false", "ls-files", "-co", "--exclude-standard"
+    )
     out = []
     for p in ls.splitlines():
         p = _unquote(p)
@@ -112,11 +138,17 @@ def _resolve_import(mod: str, from_path: str, files: set[str]) -> str | None:
         if not lead:  # absolute: resolve from the repo root first, file dir as fallback
             for i in range(len(parts), 0, -1):
                 stem = pathlib.PurePosixPath(*parts[:i])
-                cands += [str(stem) + ".py", str(pathlib.PurePosixPath(*stem.parts, "__init__.py"))]
+                cands += [
+                    str(stem) + ".py",
+                    str(pathlib.PurePosixPath(*stem.parts, "__init__.py")),
+                ]
         for i in range(len(parts), 0, -1):  # deepest package first
             stem_parts = base + parts[:i]
             stem = pathlib.PurePosixPath(*stem_parts)
-            cands += [str(stem) + ".py", str(pathlib.PurePosixPath(*stem_parts, "__init__.py"))]
+            cands += [
+                str(stem) + ".py",
+                str(pathlib.PurePosixPath(*stem_parts, "__init__.py")),
+            ]
     else:
         return None
     for c in cands:
@@ -129,8 +161,14 @@ def index_one(repo: pathlib.Path, path: str) -> dict:
     """Per-file pipeline shared by full index and reindex (T06)."""
     p = repo / path
     suffix = p.suffix.lower()
-    entry: dict = {"path": path, "size": p.stat().st_size, "lang": suffix.lstrip(".") or "text",
-                   "symbols": [], "calls": [], "imports": []}
+    entry: dict = {
+        "path": path,
+        "size": p.stat().st_size,
+        "lang": suffix.lstrip(".") or "text",
+        "symbols": [],
+        "calls": [],
+        "imports": [],
+    }
     if not p.is_file():  # tracked dirs/symlinked dirs (e.g. serde/src/core) are skipped
         return entry
     if p.stat().st_size > 8_000_000:  # never read huge/binary blobs
@@ -145,8 +183,10 @@ def index_one(repo: pathlib.Path, path: str) -> dict:
     if suffix in symbols_ts.LANG_BY_EXT and symbols_ts.available():
         try:
             syms = symbols_ts.extract_symbols(path, raw)
-            entry["calls"] = [{"caller": caller, "callee": callee}
-                              for caller, callee in symbols_ts.extract_calls(path, raw)]
+            entry["calls"] = [
+                {"caller": caller, "callee": callee}
+                for caller, callee in symbols_ts.extract_calls(path, raw)
+            ]
             entry["imports"] = symbols_ts.extract_imports(path, raw)
         except Exception:
             syms = scan_symbols(path, src)
@@ -158,7 +198,9 @@ def index_one(repo: pathlib.Path, path: str) -> dict:
 
 def index_repo(repo: str | pathlib.Path) -> dict:
     repo = pathlib.Path(repo).resolve()
-    log = _git(repo, "log", r"--pretty=format:%H%x1f%an%x1f%ae%x1f%aI%x1f%s%x1e", "--name-only")
+    log = _git(
+        repo, "log", r"--pretty=format:%H%x1f%an%x1f%ae%x1f%aI%x1f%s%x1e", "--name-only"
+    )
     commits: list[dict] = []
     # Stream layout: HEAD\x1e\n<files of commit k>\nHEAD(k+1)\x1e\n<files(k+1)>...
     # i.e. each pretty header is terminated by \x1e and the files that follow
@@ -172,19 +214,37 @@ def index_repo(repo: str | pathlib.Path) -> dict:
             if "\x1f" in line:
                 if last_head is not None:
                     head, files = last_head
-                    sha, an, ae, at, subject = (head.split("\x1f") + [""])[:5]  # empty subject: strip() drops the trailing \x1f
-                    commits.append({"sha": sha, "author_name": an, "author_email": ae,
-                                    "occurred_at": at, "subject": subject,
-                                    "files_changed": "\n".join(files)})
+                    sha, an, ae, at, subject = (head.split("\x1f") + [""])[
+                        :5
+                    ]  # empty subject: strip() drops the trailing \x1f
+                    commits.append(
+                        {
+                            "sha": sha,
+                            "author_name": an,
+                            "author_email": ae,
+                            "occurred_at": at,
+                            "subject": subject,
+                            "files_changed": "\n".join(files),
+                        }
+                    )
                 last_head = (line, [])
             elif last_head is not None:
                 last_head[1].append(line)
     if last_head is not None:
         head, files = last_head
-        sha, an, ae, at, subject = (head.split("\x1f") + [""])[:5]  # empty subject: strip() drops the trailing \x1f
-        commits.append({"sha": sha, "author_name": an, "author_email": ae,
-                        "occurred_at": at, "subject": subject,
-                        "files_changed": "\n".join(files)})
+        sha, an, ae, at, subject = (head.split("\x1f") + [""])[
+            :5
+        ]  # empty subject: strip() drops the trailing \x1f
+        commits.append(
+            {
+                "sha": sha,
+                "author_name": an,
+                "author_email": ae,
+                "occurred_at": at,
+                "subject": subject,
+                "files_changed": "\n".join(files),
+            }
+        )
 
     symbols: list[dict] = []
     tree: list[dict] = []
@@ -194,8 +254,14 @@ def index_repo(repo: str | pathlib.Path) -> dict:
     files_set = set(list_files(repo))
     for path in sorted(files_set):
         entry = index_one(repo, path)
-        tree.append({"path": entry["path"], "size": entry["size"], "lang": entry["lang"],
-                     "symbols": entry["symbols"]})
+        tree.append(
+            {
+                "path": entry["path"],
+                "size": entry["size"],
+                "lang": entry["lang"],
+                "symbols": entry["symbols"],
+            }
+        )
         if entry.get("text") is not None:
             texts[path] = entry["text"]
         for s in entry["symbols"]:
@@ -209,7 +275,14 @@ def index_repo(repo: str | pathlib.Path) -> dict:
         if target:
             imports.append({"path": from_path, "target": target})
 
-    return {"repo": str(repo), "commits": commits, "tree": tree, "symbols": symbols,
-            "calls": calls, "imports": imports, "texts": texts,
-            "head_sha": _git(repo, "rev-parse", "HEAD").strip(),
-            "indexed_at": _dt.datetime.now(_dt.timezone.utc).isoformat()}
+    return {
+        "repo": str(repo),
+        "commits": commits,
+        "tree": tree,
+        "symbols": symbols,
+        "calls": calls,
+        "imports": imports,
+        "texts": texts,
+        "head_sha": _git(repo, "rev-parse", "HEAD").strip(),
+        "indexed_at": _dt.datetime.now(_dt.timezone.utc).isoformat(),
+    }

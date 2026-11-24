@@ -4,14 +4,28 @@ One grammar pack for all languages. Every function is fail-soft: repoindex
 falls back to its regex scan when this module is unavailable or a language
 parse/query fails, so the uvx zero-setup path never breaks.
 """
+
 from __future__ import annotations
 
 LANG_BY_EXT = {
-    ".py": "python", ".js": "javascript", ".jsx": "javascript", ".mjs": "javascript",
-    ".cjs": "javascript", ".ts": "typescript", ".tsx": "tsx",
-    ".go": "go", ".rs": "rust", ".java": "java",
-    ".c": "c", ".h": "c", ".cpp": "cpp", ".cc": "cpp", ".cxx": "cpp", ".hpp": "cpp",
-    ".rb": "ruby", ".php": "php",
+    ".py": "python",
+    ".js": "javascript",
+    ".jsx": "javascript",
+    ".mjs": "javascript",
+    ".cjs": "javascript",
+    ".ts": "typescript",
+    ".tsx": "tsx",
+    ".go": "go",
+    ".rs": "rust",
+    ".java": "java",
+    ".c": "c",
+    ".h": "c",
+    ".cpp": "cpp",
+    ".cc": "cpp",
+    ".cxx": "cpp",
+    ".hpp": "cpp",
+    ".rb": "ruby",
+    ".php": "php",
 }
 
 # Capture scheme per language: @fn/@cls = definition name, @deffn/@defcls =
@@ -99,6 +113,7 @@ _IMPORT_QUERIES = {
 try:
     from tree_sitter import Query, QueryCursor
     from tree_sitter_language_pack import get_language, get_parser
+
     _PACK_ERROR = None
 except Exception as _e:  # pragma: no cover - exercised only without the pack
     get_language = get_parser = None
@@ -131,7 +146,9 @@ def _query(lang: str, kind: str) -> list:
     whole language, so each pattern compiles on its own."""
     key = (lang, kind)
     if key not in _queries:
-        table = {"def": _DEF_QUERIES, "call": _CALL_QUERIES, "import": _IMPORT_QUERIES}[kind]
+        table = {"def": _DEF_QUERIES, "call": _CALL_QUERIES, "import": _IMPORT_QUERIES}[
+            kind
+        ]
         src = table.get(lang)
         if src is None:
             _queries[key] = []
@@ -150,15 +167,18 @@ def _captures(queries: list, root) -> dict[str, list]:
     out: dict[str, list] = {}
     for q in queries:
         res = QueryCursor(q).captures(root)
-        items = res.items() if isinstance(res, dict) else (
-            (name, [node]) for node, name in res)
+        items = (
+            res.items()
+            if isinstance(res, dict)
+            else ((name, [node]) for node, name in res)
+        )
         for name, nodes in items:
             out.setdefault(name, []).extend(nodes)
     return out
 
 
 def _text(node, src: bytes) -> str:
-    return src[node.start_byte:node.end_byte].decode("utf-8", errors="ignore")
+    return src[node.start_byte : node.end_byte].decode("utf-8", errors="ignore")
 
 
 def _lang_for(path: str) -> str | None:
@@ -188,7 +208,7 @@ def extract_symbols(path: str, src: bytes) -> list[tuple[str, str]]:
     if lang is None or get_parser is None or not q:
         raise LookupError(f"no tree-sitter symbols for {path}")
     caps = _captures(q, get_parser(lang).parse(src).root_node)
-    out = [( "function", _text(n, src)) for n in caps.get("fn", [])]
+    out = [("function", _text(n, src)) for n in caps.get("fn", [])]
     out += [("class", _text(n, src)) for n in caps.get("cls", [])]
     seen, uniq = set(), []
     for item in out:
@@ -206,7 +226,11 @@ def extract_calls(path: str, src: bytes) -> list[tuple[str | None, str]]:
     if lang is None or get_parser is None or not q:
         return []
     root = get_parser(lang).parse(src).root_node
-    defs = _pair_defs(_captures(_query(lang, "def"), root), src) if _query(lang, "def") else []
+    defs = (
+        _pair_defs(_captures(_query(lang, "def"), root), src)
+        if _query(lang, "def")
+        else []
+    )
     out: list[tuple[str | None, str]] = []
     for n in _captures(q, root).get("callee", []):
         callee = _text(n, src)

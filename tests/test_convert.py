@@ -28,4 +28,3 @@ def test_pdf_to_text_calls_mineru(tmp_path, monkeypatch):
     assert out == "# Title\n"
     m.assert_called_once()
     assert "parse" in m.call_args.args[0]
-

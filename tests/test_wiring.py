@@ -11,4 +11,3 @@ def test_inject_context_returns_files_and_commits(sample_repo):
     assert "Relevant files:" in out
     assert "app.py" in out or "util.ts" in out
     assert "Recent commits:" in out
-

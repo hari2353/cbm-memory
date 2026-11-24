@@ -5,15 +5,17 @@ SIGNAL_TYPE_RE = re.compile(r"^[a-z][a-z0-9_]*(\.[a-z][a-z0-9_]*){1,3}\.v[0-9]+$
 
 def test_signal_type_shape_matches_gmp_convention():
     from cbm_memory.signals import signal_type
+
     assert SIGNAL_TYPE_RE.match(signal_type("commit"))
     assert SIGNAL_TYPE_RE.match(signal_type("file_changed"))
-    assert not SIGNAL_TYPE_RE.match("codebase.X.v1")   # uppercase segment: invalid
+    assert not SIGNAL_TYPE_RE.match("codebase.X.v1")  # uppercase segment: invalid
     assert not SIGNAL_TYPE_RE.match("codebase.commit")  # missing version: invalid
 
 
 def test_committed_envelope_fields(sample_repo):
     from cbm_memory.signals import to_signals, InMemorySink
     from cbm_memory.repoindex import index_repo
+
     data = index_repo(sample_repo)
     sink = InMemorySink()
     to_signals(data, sink=sink)

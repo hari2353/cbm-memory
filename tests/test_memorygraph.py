@@ -26,7 +26,6 @@ def test_search_finds_by_name_and_meta():
     g.close()
 
 
-
 def test_retain_recall_reflect_and_observe():
     g = MemoryGraph()
     g.add_entity("p", "proj", "project")
@@ -49,4 +48,3 @@ def test_recall_time_window():
     r = g.recall("p", since="2026-10-15T00:00:00Z")
     assert [e["text"] for e in r["episodes"]] == ["late"]
     g.close()
-

@@ -42,4 +42,3 @@ def test_ingest_vault_projects_into_memory_graph():
         ctx = g.recall("note:note1")
         assert ctx is not None and len(ctx["episodes"]) == 1
         g.close()
-

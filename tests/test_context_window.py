@@ -52,7 +52,11 @@ def test_graph_context_window_is_bounded_and_chronological():
         graph.add_episode("svc", f"e{i}", f"2026-01-01T00:00:{i:02d}Z")
     out = graph.context_window("svc", sinks=2, recent=3)
     assert [episode["text"] for episode in out["episodes"]] == [
-        "e0", "e1", "e7", "e8", "e9",
+        "e0",
+        "e1",
+        "e7",
+        "e8",
+        "e9",
     ]
     assert out["omitted"] == 5
     graph.close()

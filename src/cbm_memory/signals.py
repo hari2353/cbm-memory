@@ -1,6 +1,7 @@
 """Signal adapter: emit GMP-shaped CloudEvents (graph-memory-platform SPEC §6,
 `POST /v1/signals:batch` input). Types: `codebase.<name>.v1`; user_key =
 author email; dedup identity = source (git://repo) + id (sha[:12]:path)."""
+
 from __future__ import annotations
 
 import re
@@ -33,10 +34,18 @@ class GmpHttpSink:
         import requests  # lazy so unit tests don't need it
 
         headers = {"Authorization": f"Bearer {self.token}"} if self.token else {}
-        r = requests.post(f"{self.base_url}/v1/signals:batch",
-                          json=envelopes, headers=headers, timeout=10)
+        r = requests.post(
+            f"{self.base_url}/v1/signals:batch",
+            json=envelopes,
+            headers=headers,
+            timeout=10,
+        )
         r.raise_for_status()
-        return r.json().get("accepted", len(envelopes)) if "json" in r.headers.get("content-type", "") else 1
+        return (
+            r.json().get("accepted", len(envelopes))
+            if "json" in r.headers.get("content-type", "")
+            else 1
+        )
 
 
 def to_signals(index: dict, sink) -> int:
@@ -44,35 +53,45 @@ def to_signals(index: dict, sink) -> int:
     source = f"git://{repo}"
     envelopes: list[dict] = []
     for c in index["commits"]:
-        envelopes.append({
-            "specversion": "1.0",
-            "id": f"{c['sha'][:12]}",
-            "source": source,
-            "type": signal_type("commit"),
-            "time": c["occurred_at"],
-            "partitionkey": c["author_email"] or c["author_name"] or "unknown",
-            "data": {"sha": c["sha"], "author_name": c["author_name"],
-                     "author_email": c["author_email"], "subject": c["subject"],
-                     "files": c["files_changed"].split()},
-        })
-        for path in c["files_changed"].split():
-            envelopes.append({
+        envelopes.append(
+            {
                 "specversion": "1.0",
-                "id": f"{c['sha'][:12]}:{path}",
+                "id": f"{c['sha'][:12]}",
                 "source": source,
-                "type": signal_type("file_changed"),
+                "type": signal_type("commit"),
                 "time": c["occurred_at"],
                 "partitionkey": c["author_email"] or c["author_name"] or "unknown",
-                "data": {"path": path, "sha": c["sha"]},
-            })
+                "data": {
+                    "sha": c["sha"],
+                    "author_name": c["author_name"],
+                    "author_email": c["author_email"],
+                    "subject": c["subject"],
+                    "files": c["files_changed"].split(),
+                },
+            }
+        )
+        for path in c["files_changed"].split():
+            envelopes.append(
+                {
+                    "specversion": "1.0",
+                    "id": f"{c['sha'][:12]}:{path}",
+                    "source": source,
+                    "type": signal_type("file_changed"),
+                    "time": c["occurred_at"],
+                    "partitionkey": c["author_email"] or c["author_name"] or "unknown",
+                    "data": {"path": path, "sha": c["sha"]},
+                }
+            )
     for s in index["symbols"]:
-        envelopes.append({
-            "specversion": "1.0",
-            "id": f"sym:{s['path']}:{s['kind']}:{s['name']}",
-            "source": source,
-            "type": signal_type("symbol_seen"),
-            "time": "2026-10-31T00:00:00Z",
-            "partitionkey": "codebase",
-            "data": {"path": s["path"], "kind": s["kind"], "name": s["name"]},
-        })
+        envelopes.append(
+            {
+                "specversion": "1.0",
+                "id": f"sym:{s['path']}:{s['kind']}:{s['name']}",
+                "source": source,
+                "type": signal_type("symbol_seen"),
+                "time": "2026-10-31T00:00:00Z",
+                "partitionkey": "codebase",
+                "data": {"path": s["path"], "kind": s["kind"], "name": s["name"]},
+            }
+        )
     return sink.push([e for e in envelopes if SIGNAL_RE.match(e["type"])])

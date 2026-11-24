@@ -1,6 +1,7 @@
 """MCP server (T01): FastMCP tools backed by the in-process GitNexusGraph.
 Run:  python -m cbm_memory.mcp_server <repo> [repo2 ...]   # stdio, 1+ repos
 """
+
 from __future__ import annotations
 
 import json
@@ -21,11 +22,15 @@ def set_graph(graph: GitNexusGraph) -> None:
 
 def get_graph() -> GitNexusGraph:
     if _GRAPH is None:
-        raise RuntimeError("no graph loaded; run index_repository(repo_path) first or call set_graph()")
+        raise RuntimeError(
+            "no graph loaded; run index_repository(repo_path) first or call set_graph()"
+        )
     return _GRAPH
 
 
-def index_repositories(paths, workers: int = 4, cache_dir: str | None = None) -> GitNexusGraph:
+def index_repositories(
+    paths, workers: int = 4, cache_dir: str | None = None
+) -> GitNexusGraph:
     """Index one or more repos (parse phase parallel across repos) into ONE
     graph; servers may host several repos, tools are repo-agnostic.
 
@@ -51,10 +56,12 @@ def index_repositories(paths, workers: int = 4, cache_dir: str | None = None) ->
         msg = licensing.notice(len(repos))
         if msg:
             print(msg, file=sys.stderr)
-            repos = repos[:licensing.FREE_MAX_REPOS]
+            repos = repos[: licensing.FREE_MAX_REPOS]
 
     if cache_dir is None:
-        cache_dir = os.environ.get("XDG_CACHE_HOME", str(pathlib.Path.home() / ".cache"))
+        cache_dir = os.environ.get(
+            "XDG_CACHE_HOME", str(pathlib.Path.home() / ".cache")
+        )
     cdir = pathlib.Path(cache_dir) / "cbm-memory"
     cdir.mkdir(parents=True, exist_ok=True)
     key = hashlib.sha1("\x00".join(sorted(repos)).encode()).hexdigest()[:16]
@@ -128,8 +135,10 @@ def watch(paths, interval: float = 2.0) -> None:
 
     paths = [str(pathlib.Path(p).resolve()) for p in paths]
     g = index_repositories(paths)
-    print(f"cbm-memory watch: {len(paths)} repo(s), every {interval}s (Ctrl-C stops)",
-          file=sys.stderr)
+    print(
+        f"cbm-memory watch: {len(paths)} repo(s), every {interval}s (Ctrl-C stops)",
+        file=sys.stderr,
+    )
     while True:
         time.sleep(interval)
         for p in watch_tick(g, paths):
@@ -141,37 +150,53 @@ def secure_preset(account: str, gateway: str) -> str:
     Gateway. Provider credentials live in Cloudflare (BYOK/Unified Billing);
     the client holds only the gateway auth token and requests never leave
     localhost unauthenticated."""
-    return json.dumps({
-        "$schema": "https://opencode.ai/config.json",
-        "providers": {
-            "anthropic": {
-                "settings": {
-                    "baseURL": (f"http://localhost:8787/bili/"
-                                f"https://gateway.ai.cloudflare.com/v1/{account}/{gateway}/anthropic"),
-                    "apiKey": "{env:ANTHROPIC_API_KEY}",
-                },
-                "headers": {"cf-aig-authorization": "Bearer <CF_AIG_TOKEN>"},
-            }
+    return json.dumps(
+        {
+            "$schema": "https://opencode.ai/config.json",
+            "providers": {
+                "anthropic": {
+                    "settings": {
+                        "baseURL": (
+                            f"http://localhost:8787/bili/"
+                            f"https://gateway.ai.cloudflare.com/v1/{account}/{gateway}/anthropic"
+                        ),
+                        "apiKey": "{env:ANTHROPIC_API_KEY}",
+                    },
+                    "headers": {"cf-aig-authorization": "Bearer <CF_AIG_TOKEN>"},
+                }
+            },
         },
-    }, indent=2)
+        indent=2,
+    )
 
 
 def index_repository(repo_path: str) -> dict:
-    data = index_repositories([repo_path]).db.execute(
-        "SELECT repo FROM repo_meta ORDER BY indexed_at DESC LIMIT 1").fetchone()
+    data = (
+        index_repositories([repo_path])
+        .db.execute("SELECT repo FROM repo_meta ORDER BY indexed_at DESC LIMIT 1")
+        .fetchone()
+    )
     graph = get_graph()
     repo = data["repo"]
     files = graph.db.execute(
-        "SELECT COUNT(*) FROM nodes WHERE kind='file' AND repo=?", (repo,)).fetchone()[0]
+        "SELECT COUNT(*) FROM nodes WHERE kind='file' AND repo=?", (repo,)
+    ).fetchone()[0]
     symbols = graph.db.execute(
-        "SELECT COUNT(*) FROM nodes WHERE kind='symbol' AND repo=?", (repo,)).fetchone()[0]
+        "SELECT COUNT(*) FROM nodes WHERE kind='symbol' AND repo=?", (repo,)
+    ).fetchone()[0]
     commits = graph.db.execute(
-        "SELECT COUNT(*) FROM nodes WHERE kind='commit' AND repo=?", (repo,)).fetchone()[0]
-    return {"indexed": repo_path, "commits": commits,
-            "files": files, "symbols": symbols}
+        "SELECT COUNT(*) FROM nodes WHERE kind='commit' AND repo=?", (repo,)
+    ).fetchone()[0]
+    return {
+        "indexed": repo_path,
+        "commits": commits,
+        "files": files,
+        "symbols": symbols,
+    }
 
 
 # ---- tool bodies (tested directly; FastMCP wraps them below) ----
+
 
 def get_codebase_context(ctx=None, repo: str = "*", query: str = "") -> dict:
     return get_graph().get_codebase_context(repo, query)
@@ -207,7 +232,7 @@ def build_mcp(pro: bool | None = None):
     if pro is None:
         pro = licensing.is_pro()
     try:
-        from mcp.server.mcpserver import MCPServer          # mcp 2.x
+        from mcp.server.mcpserver import MCPServer  # mcp 2.x
     except ImportError:
         from mcp.server.fastmcp import FastMCP as MCPServer  # mcp 1.x
     mcp = MCPServer("cbm-memory")
@@ -215,42 +240,42 @@ def build_mcp(pro: bool | None = None):
     @mcp.tool()
     def get_codebase_context(repo: str = "*", query: str = "") -> dict:
         """Relevant files + recent commits for a work query, from repo memory.
-repo="*" searches ALL indexed repos (each hit labeled with its repo); a
-specific repo scopes results to it and adds `related`: top hits from your
-OTHER repos (cross-pollination)."""
+        repo="*" searches ALL indexed repos (each hit labeled with its repo); a
+        specific repo scopes results to it and adds `related`: top hits from your
+        OTHER repos (cross-pollination)."""
         return get_graph().get_codebase_context(repo, query)
 
     @mcp.tool()
     def search_codebase_memory(repo: str = "*", query: str = "") -> list[dict]:
         """Search indexed symbols by name fragment, then file contents (FTS).
-Spans every indexed repo; rows carry `repo` so hits are attributable."""
+        Spans every indexed repo; rows carry `repo` so hits are attributable."""
         return get_graph().search_codebase_memory(repo, query)
 
     @mcp.tool()
     def explain_file(repo: str = "*", path: str = "") -> dict:
         """Provenance for one file: its symbols + commits that modified it.
-If several indexed repos contain the same path, `repo` picks one (others
-listed in `repos`); `related` surfaces the same-named symbols in other
-repos (cross-pollination)."""
+        If several indexed repos contain the same path, `repo` picks one (others
+        listed in `repos`); `related` surfaces the same-named symbols in other
+        repos (cross-pollination)."""
         return get_graph().explain_file(repo, path)
 
     @mcp.tool()
     def team_activity(repo: str = "*") -> list[dict]:
         """Commits per author across the indexed repo(s); the same person
-working in several repos is merged into one row with a `repos` count."""
+        working in several repos is merged into one row with a `repos` count."""
         return get_graph().team_activity(repo)
 
     @mcp.tool()
     def find_callers(repo: str = "*", symbol: str = "") -> list[dict]:
         """Who calls this symbol: caller functions + their files (call graph).
-Searches every indexed repo by symbol name; hits carry `repo`."""
+        Searches every indexed repo by symbol name; hits carry `repo`."""
         return get_graph().find_callers(repo, symbol)
 
     @mcp.tool()
     def change_impact(repo: str = "*", path: str = "") -> dict:
         """Blast radius of editing a file: symbols + impacted files by depth.
-Scoped to the file's repo (resolved by `repo` when several repos share
-the path)."""
+        Scoped to the file's repo (resolved by `repo` when several repos share
+        the path)."""
         return get_graph().change_impact(repo, path)
 
     @mcp.tool()
@@ -259,6 +284,7 @@ the path)."""
         return get_graph().reindex(repo)
 
     if pro:
+
         @mcp.tool()
         def architecture_report(repo: str = "*") -> dict:
             """Architecture health (Pro): import cycles (Tarjan SCC), god files
@@ -268,6 +294,7 @@ the path)."""
     @mcp.resource("codebase://indexed")
     def indexed() -> str:
         from .graph import _SCHEMA
+
         return "codebase-memory MCP; sources indexed via index_repository tool."
 
     return mcp
@@ -290,8 +317,10 @@ def main(repo_path: str | None = None) -> None:
             return
         args = sys.argv[2:]
         if len(args) != 2:
-            print("usage: cbm-memory secure <CLOUDFLARE_ACCOUNT_ID> <GATEWAY_NAME>",
-                  file=sys.stderr)
+            print(
+                "usage: cbm-memory secure <CLOUDFLARE_ACCOUNT_ID> <GATEWAY_NAME>",
+                file=sys.stderr,
+            )
             return
         print(secure_preset(*args))
         return
@@ -305,4 +334,5 @@ def main(repo_path: str | None = None) -> None:
 
 if __name__ == "__main__":
     import sys
+
     main(sys.argv[1] if len(sys.argv) > 1 else None)

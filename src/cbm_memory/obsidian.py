@@ -4,6 +4,7 @@ A vault is a directory of markdown notes plus a `.obsidian/` config dir.
 We extract: note title (filename), body, [[wikilinks]], and #tags, and project
 them as entities (notes, tags) + episodes (note body) + contains edges.
 """
+
 from __future__ import annotations
 
 import re
@@ -39,15 +40,24 @@ def ingest_vault(vault_root, graph) -> int:
     notes = scan_vault(vault_root)
     titles = {n["title"] for n in notes}
     for n in notes:
-        graph.add_entity(f"note:{n['title']}", n["title"], "note",
-                         {"path": n["path"], "tags": n["tags"]})
-        graph.retain(f"note:{n['title']}", n["text"], "2026-01-01T00:00:00Z", "obsidian")
+        graph.add_entity(
+            f"note:{n['title']}",
+            n["title"],
+            "note",
+            {"path": n["path"], "tags": n["tags"]},
+        )
+        graph.retain(
+            f"note:{n['title']}", n["text"], "2026-01-01T00:00:00Z", "obsidian"
+        )
         for tag in n["tags"]:
             graph.add_entity(f"tag:{tag}", tag, "tag", {})
-            graph.add_episode(f"tag:{tag}", f"tagged in {n['title']}",
-                             "2026-01-01T00:00:00Z", "obsidian")
+            graph.add_episode(
+                f"tag:{tag}",
+                f"tagged in {n['title']}",
+                "2026-01-01T00:00:00Z",
+                "obsidian",
+            )
         for link in n["links"]:
             if link in titles:
                 graph.add_entity(f"note:{link}", link, "note", {})
     return len(notes)
-

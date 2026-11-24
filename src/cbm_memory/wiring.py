@@ -2,6 +2,7 @@
 that other repos (job-hunt-ai, bharat-arp, india-quant) can inject into
 their prompts or evidence ledgers.
 """
+
 from __future__ import annotations
 
 from .graph import GitNexusGraph
@@ -20,4 +21,3 @@ def inject_context(graph: GitNexusGraph, repo: str, query: str, top_k: int = 5) 
         for c in ctx["recent_commits"]:
             lines.append(f"  - {c.get('subject', '')} ({c.get('occurred_at', '')})")
     return "\n".join(lines)
-

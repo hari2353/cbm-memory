@@ -17,9 +17,16 @@ def test_workflow_recorder_flushes_to_sink():
 
 def test_to_workflow_signals_direct():
     sink = InMemorySink()
-    events = [{"tool": "x", "repo": "r", "user": "u", "outcome": "ok",
-               "occurred_at": "2026-10-31T00:00:00Z", "id": "e1"}]
+    events = [
+        {
+            "tool": "x",
+            "repo": "r",
+            "user": "u",
+            "outcome": "ok",
+            "occurred_at": "2026-10-31T00:00:00Z",
+            "id": "e1",
+        }
+    ]
     assert to_workflow_signals(events, sink) == 1
     assert sink.signals[0]["partitionkey"] == "u"
     assert sink.signals[0]["data"]["tool"] == "x"
-

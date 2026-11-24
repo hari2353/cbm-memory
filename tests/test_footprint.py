@@ -37,7 +37,13 @@ def test_estimate_index_bytes_scales():
 
 
 def test_estimate_index_bytes_rejects_negative():
-    for kwargs in ({"files": -1}, {"symbols": -1}, {"call_edges": -1}, {"import_edges": -1}, {"commits": -1}):
+    for kwargs in (
+        {"files": -1},
+        {"symbols": -1},
+        {"call_edges": -1},
+        {"import_edges": -1},
+        {"commits": -1},
+    ):
         try:
             estimate_index_bytes(**kwargs)
         except ValueError:
@@ -48,7 +54,11 @@ def test_estimate_index_bytes_rejects_negative():
 def test_summarize_index():
     index = {
         "files": [
-            {"symbols": [{"name": "a"}, {"name": "b"}], "calls": [{"x": 1}], "imports": []},
+            {
+                "symbols": [{"name": "a"}, {"name": "b"}],
+                "calls": [{"x": 1}],
+                "imports": [],
+            },
             {"symbols": [], "calls": [], "imports": [{"m": 1}, {"m": 2}]},
         ],
         "commits": [{"sha": "1"}, {"sha": "2"}],

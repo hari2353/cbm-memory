@@ -11,6 +11,7 @@ time-stamped observations attached to an entity; observations are consolidated
 facts derived from episodes. `recall(key)` returns the entity plus its
 recent episodes — the read-back an agent needs to stay consistent.
 """
+
 from __future__ import annotations
 
 import json
@@ -69,19 +70,24 @@ class MemoryGraph:
         with self._lock:
             self.db.execute(
                 "INSERT OR REPLACE INTO entities VALUES (?,?,?,?)",
-                (key, name, kind, json.dumps(meta or {})))
+                (key, name, kind, json.dumps(meta or {})),
+            )
             self.db.commit()
 
-    def retain(self, entity_key: str, text: str, occurred_at: str, source: str = "") -> int:
+    def retain(
+        self, entity_key: str, text: str, occurred_at: str, source: str = ""
+    ) -> int:
         """Alias for add_episode: the hindsight 'retain' verb."""
         return self.add_episode(entity_key, text, occurred_at, source)
 
-    def add_episode(self, entity_key: str, text: str, occurred_at: str,
-                    source: str = "") -> int:
+    def add_episode(
+        self, entity_key: str, text: str, occurred_at: str, source: str = ""
+    ) -> int:
         with self._lock:
             cur = self.db.execute(
                 "INSERT INTO episodes (entity_key, text, occurred_at, source) VALUES (?,?,?,?)",
-                (entity_key, text, occurred_at, source))
+                (entity_key, text, occurred_at, source),
+            )
             self.db.commit()
             return cur.lastrowid
 
@@ -95,21 +101,33 @@ class MemoryGraph:
         if fact not in obs:
             obs.append(fact)
         with self._lock:
-            self.db.execute("UPDATE entities SET meta=? WHERE key=?",
-                            (json.dumps(meta), entity_key))
+            self.db.execute(
+                "UPDATE entities SET meta=? WHERE key=?", (json.dumps(meta), entity_key)
+            )
             self.db.commit()
 
     def get_entity(self, key: str) -> dict | None:
         with self._lock:
             row = self.db.execute(
-                "SELECT key, name, kind, meta FROM entities WHERE key=?", (key,)).fetchone()
+                "SELECT key, name, kind, meta FROM entities WHERE key=?", (key,)
+            ).fetchone()
             if not row:
                 return None
-            return {"key": row["key"], "name": row["name"], "kind": row["kind"],
-                    "meta": json.loads(row["meta"])}
+            return {
+                "key": row["key"],
+                "name": row["name"],
+                "kind": row["kind"],
+                "meta": json.loads(row["meta"]),
+            }
 
-    def recall(self, key: str, query: str | None = None, since: str | None = None,
-               until: str | None = None, limit: int = 20) -> dict | None:
+    def recall(
+        self,
+        key: str,
+        query: str | None = None,
+        since: str | None = None,
+        until: str | None = None,
+        limit: int = 20,
+    ) -> dict | None:
         """Read-back with optional full-text filter and time window."""
         ent = self.get_entity(key)
         if ent is None:
@@ -123,7 +141,8 @@ class MemoryGraph:
                     "AND (? IS NULL OR e.occurred_at >= ?) "
                     "AND (? IS NULL OR e.occurred_at <= ?) "
                     "ORDER BY e.occurred_at DESC LIMIT ?",
-                    (key, query, since, since, until, until, limit)).fetchall()
+                    (key, query, since, since, until, until, limit),
+                ).fetchall()
             else:
                 rows = self.db.execute(
                     "SELECT text, occurred_at, source FROM episodes "
@@ -131,11 +150,14 @@ class MemoryGraph:
                     "AND (? IS NULL OR occurred_at >= ?) "
                     "AND (? IS NULL OR occurred_at <= ?) "
                     "ORDER BY occurred_at DESC LIMIT ?",
-                    (key, since, since, until, until, limit)).fetchall()
+                    (key, since, since, until, until, limit),
+                ).fetchall()
         ent["episodes"] = [dict(r) for r in rows]
         return ent
 
-    def context_window(self, key: str, *, sinks: int = 2, recent: int = 6) -> dict | None:
+    def context_window(
+        self, key: str, *, sinks: int = 2, recent: int = 6
+    ) -> dict | None:
         """Bounded read-back: first ``sinks`` plus last ``recent`` episodes.
 
         Keeps the attention-sink anchors and the newest window, dropping the
@@ -149,17 +171,24 @@ class MemoryGraph:
             head = self.db.execute(
                 "SELECT id, text, occurred_at, source FROM episodes "
                 "WHERE entity_key=? ORDER BY occurred_at ASC, id ASC LIMIT ?",
-                (key, sinks)).fetchall()
+                (key, sinks),
+            ).fetchall()
             tail = self.db.execute(
                 "SELECT id, text, occurred_at, source FROM episodes "
                 "WHERE entity_key=? ORDER BY occurred_at DESC, id DESC LIMIT ?",
-                (key, recent)).fetchall()
+                (key, recent),
+            ).fetchall()
             total = self.db.execute(
-                "SELECT COUNT(*) FROM episodes WHERE entity_key=?", (key,)).fetchone()[0]
+                "SELECT COUNT(*) FROM episodes WHERE entity_key=?", (key,)
+            ).fetchone()[0]
         by_id = {row["id"]: row for row in [*head, *tail]}
         rows = sorted(by_id.values(), key=lambda row: (row["occurred_at"], row["id"]))
         ent["episodes"] = [
-            {"text": row["text"], "occurred_at": row["occurred_at"], "source": row["source"]}
+            {
+                "text": row["text"],
+                "occurred_at": row["occurred_at"],
+                "source": row["source"],
+            }
             for row in rows
         ]
         ent["kept"] = len(rows)
@@ -180,12 +209,26 @@ class MemoryGraph:
             rows = self.db.execute(
                 "SELECT key, name, kind, meta FROM entities "
                 "WHERE name LIKE ? OR meta LIKE ? LIMIT ?",
-                (like, like, limit)).fetchall()
-        return [{"key": r["key"], "name": r["name"], "kind": r["kind"],
-                 "meta": json.loads(r["meta"])} for r in rows]
+                (like, like, limit),
+            ).fetchall()
+        return [
+            {
+                "key": r["key"],
+                "name": r["name"],
+                "kind": r["kind"],
+                "meta": json.loads(r["meta"]),
+            }
+            for r in rows
+        ]
 
-    def remember_working(self, key: str, value: str, ttl_seconds: float = 3600,
-                         importance: float = 0.5, now=None) -> None:
+    def remember_working(
+        self,
+        key: str,
+        value: str,
+        ttl_seconds: float = 3600,
+        importance: float = 0.5,
+        now=None,
+    ) -> None:
         """Upsert a bounded scratchpad entry that expires after ttl_seconds."""
         if not ttl_seconds > 0:
             raise ValueError("ttl_seconds must be > 0")
@@ -198,8 +241,14 @@ class MemoryGraph:
                 "VALUES (?,?,?,?,?) ON CONFLICT(key) DO UPDATE SET "
                 "value=excluded.value, importance=excluded.importance, "
                 "updated_at=excluded.updated_at, expires_at=excluded.expires_at",
-                (key, value, importance, _stamp(start),
-                 _stamp(start + timedelta(seconds=ttl_seconds))))
+                (
+                    key,
+                    value,
+                    importance,
+                    _stamp(start),
+                    _stamp(start + timedelta(seconds=ttl_seconds)),
+                ),
+            )
             self.db.commit()
 
     def recall_working(self, key: str, now=None) -> dict | None:
@@ -207,7 +256,9 @@ class MemoryGraph:
         with self._lock:
             row = self.db.execute(
                 "SELECT key, value, importance, updated_at, expires_at "
-                "FROM working_memory WHERE key=?", (key,)).fetchone()
+                "FROM working_memory WHERE key=?",
+                (key,),
+            ).fetchone()
             if row is None:
                 return None
             if row["expires_at"] <= stamp:
@@ -219,7 +270,8 @@ class MemoryGraph:
     def evict_expired(self, now=None) -> int:
         with self._lock:
             cur = self.db.execute(
-                "DELETE FROM working_memory WHERE expires_at <= ?", (_stamp(now),))
+                "DELETE FROM working_memory WHERE expires_at <= ?", (_stamp(now),)
+            )
             self.db.commit()
             return cur.rowcount
 
@@ -229,17 +281,19 @@ class MemoryGraph:
                 "SELECT key, value, importance, updated_at, expires_at "
                 "FROM working_memory WHERE expires_at > ? "
                 "ORDER BY importance DESC, updated_at DESC LIMIT ?",
-                (_stamp(now), limit)).fetchall()
+                (_stamp(now), limit),
+            ).fetchall()
         return [dict(r) for r in rows]
 
-    def promote_working(self, key: str, entity_key: str, source: str = "working",
-                        now=None) -> int | None:
+    def promote_working(
+        self, key: str, entity_key: str, source: str = "working", now=None
+    ) -> int | None:
         """Move a working entry into durable episodes; None if missing/expired."""
         stamp = _stamp(now)
         with self._lock:
             row = self.db.execute(
-                "SELECT value, expires_at FROM working_memory WHERE key=?",
-                (key,)).fetchone()
+                "SELECT value, expires_at FROM working_memory WHERE key=?", (key,)
+            ).fetchone()
             if row is None:
                 return None
             if row["expires_at"] <= stamp:
@@ -248,7 +302,9 @@ class MemoryGraph:
                 return None
             cur = self.db.execute(
                 "INSERT INTO episodes (entity_key, text, occurred_at, source) "
-                "VALUES (?,?,?,?)", (entity_key, row["value"], stamp, source))
+                "VALUES (?,?,?,?)",
+                (entity_key, row["value"], stamp, source),
+            )
             self.db.execute("DELETE FROM working_memory WHERE key=?", (key,))
             self.db.commit()
             return cur.lastrowid
@@ -258,7 +314,9 @@ class MemoryGraph:
         with self._lock:
             entities = self.db.execute("SELECT COUNT(*) FROM entities").fetchone()[0]
             episodes = self.db.execute("SELECT COUNT(*) FROM episodes").fetchone()[0]
-            working = self.db.execute("SELECT COUNT(*) FROM working_memory").fetchone()[0]
+            working = self.db.execute("SELECT COUNT(*) FROM working_memory").fetchone()[
+                0
+            ]
         estimated_bytes = entities * 120 + episodes * 240 + working * 160
         return {
             "entities": entities,
@@ -269,4 +327,3 @@ class MemoryGraph:
 
     def close(self) -> None:
         self.db.close()
-

@@ -20,16 +20,16 @@ def test_nodes_and_edges_recorded(nx):
     assert counters.get("commit", 0) == 2
     assert counters.get("file", 0) >= 3
     assert counters.get("symbol", 0) >= 3
-    assert counters.get("authored", 0) >= 2     # author --authored--> commit
-    assert counters.get("modified", 0) >= 3     # commit --modified--> file
-    assert counters.get("contains", 0) >= 3     # file --contains--> symbol
+    assert counters.get("authored", 0) >= 2  # author --authored--> commit
+    assert counters.get("modified", 0) >= 3  # commit --modified--> file
+    assert counters.get("contains", 0) >= 3  # file --contains--> symbol
 
 
 def test_explain_file_returns_history_and_symbols(nx):
     qls = nx.explain_file("*", "app.py")
     assert qls["path"] == "app.py"
     assert {"greet", "Greeter"} <= {s["name"] for s in qls["symbols"]}
-    assert len(qls["commits"]) == 1             # one commit touched app.py
+    assert len(qls["commits"]) == 1  # one commit touched app.py
     assert qls["commits"][0]["author_name"] == "Hari"
 
 

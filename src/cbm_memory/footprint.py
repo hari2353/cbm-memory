@@ -23,8 +23,11 @@ def estimate_index_bytes(
 ) -> int:
     """Order-of-magnitude byte estimate for an indexed repo's graph."""
     for value, label in (
-        (files, "files"), (symbols, "symbols"), (call_edges, "call_edges"),
-        (import_edges, "import_edges"), (commits, "commits"),
+        (files, "files"),
+        (symbols, "symbols"),
+        (call_edges, "call_edges"),
+        (import_edges, "import_edges"),
+        (commits, "commits"),
     ):
         if value < 0:
             raise ValueError(f"{label} must be >= 0")

@@ -4,6 +4,7 @@ Thin dispatch layer: PDF -> markdown (via the already-installed MinerU CLI),
 plain text/markdown read-through, everything else unsupported. Keeps the
 converter logic in one place so the MCP indexer and job-hunt pipeline share it.
 """
+
 from __future__ import annotations
 
 import subprocess
@@ -20,7 +21,9 @@ def pdf_to_text(pdf_path: str | Path, mineru_bin: str = "mineru") -> str:
         raise FileNotFoundError(str(pdf_path))
     proc = subprocess.run(
         [mineru_bin, "parse", str(pdf_path), "--tier", "flash"],
-        capture_output=True, text=True, check=False,
+        capture_output=True,
+        text=True,
+        check=False,
     )
     if proc.returncode != 0:
         raise RuntimeError(proc.stderr.strip() or "mineru failed")
@@ -35,4 +38,3 @@ def convert(path: str | Path, mineru_bin: str = "mineru") -> str:
     if suffix in (".md", ".txt", ".rst"):
         return p.read_text(encoding="utf-8", errors="replace")
     raise UnsupportedFormat(f"no converter for {suffix or '(no extension)'}")
-

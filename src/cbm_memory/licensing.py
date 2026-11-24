@@ -9,6 +9,7 @@ ships in this repo or the skill zip. ed25519 sign/verify is a direct port
 of the reference implementation in RFC 8032 section 6 (IETF illustration
 code) so both directions are covered by the RFC's own test vectors.
 """
+
 from __future__ import annotations
 
 import base64
@@ -207,6 +208,8 @@ def notice(path_count: int) -> str:
     if is_pro():
         return ""
     extra = max(0, path_count - FREE_MAX_REPOS)
-    return (f"cbm-memory: free tier indexes {FREE_MAX_REPOS} repo(s) per server "
-            f"({extra} skipped); set CBM_LICENSE for fleet mode "
-            f"(codebase-memory-mcp Pro)")
+    return (
+        f"cbm-memory: free tier indexes {FREE_MAX_REPOS} repo(s) per server "
+        f"({extra} skipped); set CBM_LICENSE for fleet mode "
+        f"(codebase-memory-mcp Pro)"
+    )

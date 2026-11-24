@@ -17,7 +17,9 @@ def test_scan_symbols_python_hits_def_and_class():
 
 
 def test_scan_symbols_ts_hits_function():
-    assert scan_symbols("util.ts", "export function add(a: number) { }\nclass Foo { }") == [("function", "add"), ("class", "Foo")]
+    assert scan_symbols(
+        "util.ts", "export function add(a: number) { }\nclass Foo { }"
+    ) == [("function", "add"), ("class", "Foo")]
 
 
 def test_index_repo_returns_commits_files_symbols(sample_repo):

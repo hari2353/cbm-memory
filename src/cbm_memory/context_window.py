@@ -5,6 +5,7 @@ Cross-pollinated from mit-han-lab/streaming-llm: keep the first few items
 Applied to agent memory, this gives a deterministic context budget without
 losing the anchors that keep a long-running session stable.
 """
+
 from __future__ import annotations
 
 
@@ -15,9 +16,7 @@ def _validate_window(sinks: int, recent: int) -> None:
         raise ValueError("recent must be >= 1")
 
 
-def select_streaming_window(
-    items: list, *, sinks: int = 2, recent: int = 6
-) -> dict:
+def select_streaming_window(items: list, *, sinks: int = 2, recent: int = 6) -> dict:
     """Keep ``sinks`` head items plus ``recent`` tail items, in order.
 
     ``items`` is ordered oldest to newest. The returned dict carries the

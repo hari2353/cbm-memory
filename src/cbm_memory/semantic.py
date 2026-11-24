@@ -5,6 +5,7 @@ network-free. Word tokens + char 4-grams catch stem/typo variants ("jwt" ~
 "jwtauth"), IDF weighs rare words, L2-normalized hashed vectors make cosine
 cheap and deterministic.
 """
+
 from __future__ import annotations
 
 import hashlib
@@ -32,7 +33,7 @@ def embed(text: str, idf: dict[str, float] | None = None) -> dict[int, float]:
         if len(w) >= 2:
             words[w] += 1
             for i in range(max(len(w) - 3, 0)):  # char 4-grams: "jwt" in "jwtauth"
-                words["#4:" + w[i:i + 4]] += 1
+                words["#4:" + w[i : i + 4]] += 1
     vec: dict[int, float] = {}
     for w, c in words.items():
         h = int(hashlib.md5(w.encode("utf-8")).hexdigest()[:8], 16) % _DIM
