@@ -42,7 +42,7 @@ def index_repositories(
     import pathlib
     import sys
 
-    from .repoindex import head_and_dirty, index_repo
+    from .repoindex import index_repo
 
     paths = [str(pathlib.Path(p).resolve()) for p in paths]
     paths = list(dict.fromkeys(paths))  # duplicate path = one repo, not two
@@ -293,7 +293,6 @@ def build_mcp(pro: bool | None = None):
 
     @mcp.resource("codebase://indexed")
     def indexed() -> str:
-        from .graph import _SCHEMA
 
         return "codebase-memory MCP; sources indexed via index_repository tool."
 

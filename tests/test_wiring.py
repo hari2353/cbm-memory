@@ -1,4 +1,3 @@
-from pathlib import Path
 from cbm_memory.repoindex import index_repo
 from cbm_memory.graph import GitNexusGraph
 from cbm_memory.wiring import inject_context

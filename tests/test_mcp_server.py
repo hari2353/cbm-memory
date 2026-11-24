@@ -3,7 +3,6 @@ from cbm_memory.graph import GitNexusGraph
 
 
 def test_mcp_tool_wrappers_call_graph(sample_repo):
-    import importlib
 
     g = GitNexusGraph(":memory:")
     g.load(index_repo(sample_repo))

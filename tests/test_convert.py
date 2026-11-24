@@ -1,4 +1,3 @@
-from pathlib import Path
 from unittest.mock import patch, MagicMock
 from cbm_memory.convert import convert, pdf_to_text, UnsupportedFormat
 

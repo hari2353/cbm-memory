@@ -16,7 +16,6 @@ import base64
 import hashlib
 import json
 import os
-import sys
 import time
 
 # ---- ed25519 (RFC 8032 reference port) ----

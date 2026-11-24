@@ -1,7 +1,3 @@
-import json
-
-from git_fixtures import sample_repo
-
 from cbm_memory.repoindex import index_repo, list_files, scan_symbols
 
 

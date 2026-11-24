@@ -10,7 +10,7 @@ from __future__ import annotations
 import uuid
 from datetime import datetime, timezone
 
-from .signals import InMemorySink, signal_type
+from .signals import signal_type
 
 WORKFLOW_TYPE = signal_type("workflow")  # codebase.workflow.v1
 

@@ -3,7 +3,6 @@ T06 FTS search + reindex, T07 PageRank ranking, T09 junk-dir hygiene."""
 
 import textwrap
 
-import pytest
 
 from git_fixtures import run_git
 
@@ -226,7 +225,6 @@ def test_pagerank_beats_lexical_relevance(tmp_path):
 
 
 def test_index_repositories_multi_repo(tmp_path):
-    import threading
 
     from cbm_memory import mcp_server
 

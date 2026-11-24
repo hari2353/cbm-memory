@@ -1,6 +1,5 @@
 import pytest
 
-from git_fixtures import sample_repo
 
 from cbm_memory.repoindex import index_repo
 from cbm_memory.graph import GitNexusGraph
