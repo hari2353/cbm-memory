@@ -96,7 +96,12 @@ Counts are exact; byte figures are order-of-magnitude only. Cross-pollinated
 from Harvard Edge's TinyML-Footprint, applying the same "report your
 footprint" discipline to a codebase memory index.
 
-## Streaming context window (MIT HAN Lab StreamingLLM cross-pollination)\n\n`cbm_memory.context_window.select_streaming_window` and `MemoryGraph.context_window`\nkeep the first few episodes (attention sinks) plus the newest window and drop\nthe middle, giving a deterministic context budget for long-running sessions:\n\n```python\nfrom cbm_memory.context_window import select_streaming_window\nselect_streaming_window(items, sinks=2, recent=6)\ngraph.context_window(\"svc\", sinks=2, recent=6)\n```\n\nNo tokenizer dependency; counts are exact and bounded.\n\n## How it differs from Serena / GitNexus / codebase-memory (DeusData)
+## Streaming context window (MIT HAN Lab StreamingLLM cross-pollination)\n\n`cbm_memory.context_window.select_streaming_window` and `MemoryGraph.context_window`\nkeep the first few episodes (attention sinks) plus the newest window and drop\nthe middle, giving a deterministic context budget for long-running sessions:\n\n```python\nfrom cbm_memory.context_window import select_streaming_window\nselect_streaming_window(items, sinks=2, recent=6)\ngraph.context_window(\"svc\", sinks=2, recent=6)\n```\n\nNo tokenizer dependency; counts are exact and bounded.\n\n## Tracing (Arize phoenix cross-pollination)
+
+`cbm_memory.tracing` records parent/child spans with attributes and durations,
+with bounded export, no OpenTelemetry dependency.
+
+## How it differs from Serena / GitNexus / codebase-memory (DeusData)
 
 | | this server | Serena (~31k★) | GitNexus (~30k★) | DeusData codebase-memory-mcp |
 |---|---|---|---|---|
