@@ -101,6 +101,11 @@ footprint" discipline to a codebase memory index.
 `cbm_memory.tracing` records parent/child spans with attributes and durations,
 with bounded export, no OpenTelemetry dependency.
 
+## Index sharding (Notion/Pinterest cross-pollination)
+
+`cbm_memory.sharding` partitions a repo index across N shards by file path
+hash, with a merge helper to reassemble.
+
 ## How it differs from Serena / GitNexus / codebase-memory (DeusData)
 
 | | this server | Serena (~31k★) | GitNexus (~30k★) | DeusData codebase-memory-mcp |
